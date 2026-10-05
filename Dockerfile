@@ -5,8 +5,10 @@ COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/package.json
 COPY apps/mobile/package.json apps/mobile/package.json
 COPY packages/shared/package.json packages/shared/package.json
-RUN npm ci --workspace @rental/backend --workspace @rental/shared --include-workspace-root
+# The backend's postinstall (node scripts/prisma.js generate) needs this script and the schema, so copy them before npm ci.
+COPY apps/backend/scripts apps/backend/scripts
 COPY prisma prisma
+RUN npm ci --workspace @rental/backend --workspace @rental/shared --include-workspace-root
 COPY packages/shared packages/shared
 COPY apps/backend apps/backend
 RUN npx prisma generate --schema prisma/schema.prisma && npm run -w @rental/backend build && npm prune --omit=dev --workspace @rental/backend --workspace @rental/shared --include-workspace-root
