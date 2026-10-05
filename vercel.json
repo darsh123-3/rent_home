@@ -2,7 +2,6 @@
   "buildCommand": "npm run web:build",
   "installCommand": "npm ci",
   "outputDirectory": "apps/web/dist",
-  "cleanUrls": true,
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
   "headers": [
     {
