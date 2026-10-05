@@ -1,5 +1,7 @@
 # Backend image. Build from the repository root:  docker build -t rent-manager-api .
 FROM node:22-bookworm-slim AS build
+# Prisma picks its engine files by the OpenSSL version it finds; the slim image has none, so install it before anything else.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/package.json
@@ -17,7 +19,8 @@ FROM node:22-bookworm-slim AS run
 ENV NODE_ENV=production
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=build /app/node_modules node_modules
+# Owned by the non-root user so Prisma can write its engine files if it ever needs to.
+COPY --from=build --chown=node:node /app/node_modules node_modules
 COPY --from=build /app/prisma prisma
 COPY --from=build /app/apps/backend/dist apps/backend/dist
 COPY --from=build /app/apps/backend/assets apps/backend/assets
