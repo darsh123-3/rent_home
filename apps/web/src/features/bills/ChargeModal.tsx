@@ -1,16 +1,15 @@
 import { useState } from 'react';
 import { Button, Chip, ChipRow, Input, Modal, MoneyInput, Notice } from '@/components/ui';
-import type { ChargeType } from '@rental/shared';
+import { CHARGE_LABELS, MONTHLY_CHARGE_TYPES, type ChargeType } from '@rental/shared';
 
-export const CHARGE_TYPES: { type: Exclude<ChargeType, 'LATE_FEE'>; label: string }[] = [
-  { type: 'MAINTENANCE', label: 'Maintenance' }, { type: 'WATER', label: 'Water' }, { type: 'CLEANING', label: 'Cleaning' },
-  { type: 'INTERNET', label: 'Internet' }, { type: 'PARKING', label: 'Parking' }, { type: 'REPAIR', label: 'Repair' }, { type: 'OTHER', label: 'Other' },
-];
+/** Water, Housekeeping, MNGL fuel and WiFi first (they have their own bill line), then the other categories. */
+export const CHARGE_TYPES: { type: Exclude<ChargeType, 'LATE_FEE'>; label: string }[] = [...MONTHLY_CHARGE_TYPES, 'MAINTENANCE', 'PARKING', 'REPAIR', 'OTHER']
+  .map((type) => ({ type: type as Exclude<ChargeType, 'LATE_FEE'>, label: CHARGE_LABELS[type as ChargeType] }));
 
 export interface ChargeRow { type: ChargeType; name: string; amount: string }
 
 export function ChargeModal({ open, onClose, onAdd }: { open: boolean; onClose: () => void; onAdd: (row: ChargeRow) => void }) {
-  const [type, setType] = useState<Exclude<ChargeType, 'LATE_FEE'>>('MAINTENANCE');
+  const [type, setType] = useState<Exclude<ChargeType, 'LATE_FEE'>>('OTHER');
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [error, setError] = useState<string | null>(null);

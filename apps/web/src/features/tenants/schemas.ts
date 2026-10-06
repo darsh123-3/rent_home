@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import { today } from '@/utils/format';
 import { optionalMoneyString, orUndefined, toNumber, toOptionalNumber } from '@/utils/validation';
 
 const phone = z.string().trim().refine((v) => /^\+?[0-9]{10,15}$/.test(v.replace(/[\s-]/g, '')), 'Enter a valid phone number');
 const optionalPhone = z.string().trim().refine((v) => v === '' || /^\+?[0-9]{10,15}$/.test(v.replace(/[\s-]/g, '')), 'Enter a valid phone number');
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Select a date');
+const optionalDate = z.string().refine((v) => v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v), 'Select a date');
 
 export const tenantFormSchema = z.object({
   // Personal
@@ -29,13 +31,18 @@ export const tenantFormSchema = z.object({
   fixedElectricity: optionalMoneyString,
   initialMeterReading: optionalMoneyString,
   openingBalance: optionalMoneyString,
+  // Deposit already received at move-in (saved as the first deposit entry) and the rental agreement dates
+  depositReceived: optionalMoneyString,
+  depositReceivedOn: optionalDate,
+  agreementStartDate: optionalDate,
+  agreementEndDate: optionalDate,
 });
 export type TenantForm = z.infer<typeof tenantFormSchema>;
 
 export const emptyTenantForm: TenantForm = {
   fullName: '', joiningDate: '', occupation: '', notes: '', phone: '', alternatePhone: '', email: '', permanentAddress: '', currentAddress: '',
   emergencyContact: '', emergencyPhone: '', roomId: '', startDate: '', agreedRent: '', securityDeposit: '', electricityMode: 'METER',
-  ratePerUnit: '', fixedElectricity: '', initialMeterReading: '', openingBalance: '',
+  ratePerUnit: '', fixedElectricity: '', initialMeterReading: '', openingBalance: '', depositReceived: '', depositReceivedOn: '', agreementStartDate: '', agreementEndDate: '',
 };
 
 export const STEP_FIELDS: Record<string, (keyof TenantForm)[]> = {
@@ -43,7 +50,7 @@ export const STEP_FIELDS: Record<string, (keyof TenantForm)[]> = {
   Contact: ['phone', 'alternatePhone', 'email', 'permanentAddress', 'currentAddress', 'emergencyContact', 'emergencyPhone'],
   Documents: [],
   Room: ['roomId'],
-  'Rent & Deposit': ['startDate', 'agreedRent', 'securityDeposit', 'electricityMode', 'ratePerUnit', 'fixedElectricity', 'initialMeterReading', 'openingBalance'],
+  'Rent & Deposit': ['startDate', 'agreedRent', 'securityDeposit', 'electricityMode', 'ratePerUnit', 'fixedElectricity', 'initialMeterReading', 'openingBalance', 'depositReceived', 'depositReceivedOn', 'agreementStartDate', 'agreementEndDate'],
   Review: [],
 };
 
@@ -65,4 +72,16 @@ export const assignmentPayload = (v: TenantForm) => ({
   fixedElectricity: v.electricityMode === 'FIXED' ? toOptionalNumber(v.fixedElectricity) : undefined,
   initialMeterReading: v.electricityMode === 'METER' ? toOptionalNumber(v.initialMeterReading) : undefined,
   openingBalance: toOptionalNumber(v.openingBalance),
+  depositReceived: toOptionalNumber(v.depositReceived),
+  depositReceivedOn: toOptionalNumber(v.depositReceived) ? orUndefined(v.depositReceivedOn) : undefined,
+  agreementStartDate: orUndefined(v.agreementStartDate),
+  agreementEndDate: orUndefined(v.agreementEndDate),
 });
+
+/** Checks across fields that the schema cannot express (it is reused with pick and partial). */
+export function assignmentFieldErrors(v: Pick<TenantForm, 'depositReceived' | 'depositReceivedOn' | 'agreementStartDate' | 'agreementEndDate'>) {
+  const errors: { field: 'depositReceivedOn' | 'agreementEndDate'; message: string }[] = [];
+  if (v.agreementStartDate && v.agreementEndDate && v.agreementEndDate < v.agreementStartDate) errors.push({ field: 'agreementEndDate', message: 'Agreement end date cannot be before the start date' });
+  if (toOptionalNumber(v.depositReceived) && (v.depositReceivedOn ?? '') > today()) errors.push({ field: 'depositReceivedOn', message: 'Received date cannot be in the future' });
+  return errors;
+}

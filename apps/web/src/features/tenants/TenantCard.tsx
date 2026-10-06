@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Avatar, Badge, Card, Icon } from '@/components/ui';
 import { formatINR } from '@/utils/format';
 import type { TenantListItem } from '@rental/shared';
+import { AgreementBadge } from './AgreementBadge';
 
 export function TenantCard({ tenant }: { tenant: TenantListItem }) {
   const movedOut = tenant.status === 'MOVED_OUT';
@@ -22,6 +23,7 @@ export function TenantCard({ tenant }: { tenant: TenantListItem }) {
               {tenant.balance > 0 ? <span className="font-semibold text-danger">{formatINR(tenant.balance)} pending</span> : null}
             </div>
           ) : null}
+          {!movedOut ? <AgreementBadge agreement={tenant.agreement} compact /> : null}
         </div>
       </Link>
     </Card>

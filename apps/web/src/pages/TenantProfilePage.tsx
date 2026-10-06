@@ -10,7 +10,9 @@ import { PaymentsSection } from '@/features/payments/PaymentsSection';
 import { useDeleteTenant, useTenant } from '@/features/tenants/api';
 import { ChangeRentModal } from '@/features/tenants/ChangeRentModal';
 import { ElectricityHistory } from '@/features/tenants/ElectricityHistory';
+import { AgreementBadge } from '@/features/tenants/AgreementBadge';
 import { ElectricityModal } from '@/features/tenants/ElectricityModal';
+import { SecurityDepositCard } from '@/features/tenants/SecurityDepositCard';
 import { telUrl, whatsappUrl } from '@/features/tenants/contact';
 import { formatDate, formatINR, formatMonthShort } from '@/utils/format';
 
@@ -40,6 +42,7 @@ export function TenantProfilePage() {
         <h2 className="mt-2 text-center text-title">{t.fullName}</h2>
         <p className="text-ink-soft">{a ? `Room ${a.room.roomNumber}` : 'No room assigned'} · {t.property.name}</p>
         {t.status === 'MOVED_OUT' ? <div className="mt-1"><Badge label="Moved out" tone="neutral" /></div> : null}
+        {a ? <AgreementBadge agreement={a} className="mt-1" /> : null}
         <div className="mt-4 flex w-full gap-3">
           {t.phone ? (
             <>
@@ -56,7 +59,8 @@ export function TenantProfilePage() {
         <>
           <Card className="mt-4">
             <DetailRow label="Monthly Rent" value={summary ? formatINR(summary.agreedRent) : '-'} />
-            <DetailRow label="Deposit" value={summary ? formatINR(summary.securityDeposit) : '-'} />
+            <DetailRow label="Agreed security deposit" value={summary ? formatINR(summary.securityDeposit) : '-'} />
+            {a ? <DetailRow label="Agreement" value={a.agreementStartDate || a.agreementEndDate ? `${a.agreementStartDate ? formatDate(a.agreementStartDate) : '...'} to ${a.agreementEndDate ? formatDate(a.agreementEndDate) : '...'}` : 'Dates not added'} /> : null}
             {a ? (
               <div className="flex min-h-11 items-center justify-between gap-4 border-b border-line py-2.5">
                 <span className="text-ink-soft">Electricity</span>
@@ -83,6 +87,7 @@ export function TenantProfilePage() {
               </>
             )}
           </div>
+          {t.securityDeposit ? <SecurityDepositCard deposit={t.securityDeposit} canAdd /> : null}
           <SectionHeader title="Contact" />
           <Card>
             <DetailRow label="Phone" value={t.phone || 'Not added'} />
@@ -118,7 +123,7 @@ export function TenantProfilePage() {
             <Card key={h.assignmentId} className="space-y-1">
               <div className="flex items-center justify-between"><span className="text-heading">Room {h.room.roomNumber}</span><Badge label={h.status === 'ACTIVE' ? 'Current' : 'Closed'} tone={h.status === 'ACTIVE' ? 'success' : 'neutral'} /></div>
               <div className="text-ink-soft">{formatDate(h.startDate)} to {h.endDate ? formatDate(h.endDate) : 'Present'}</div>
-              <div className="text-small text-ink-soft">{formatINR(h.agreedRent)} / month · Deposit {formatINR(h.securityDeposit)}</div>
+              <div className="text-small text-ink-soft">{formatINR(h.agreedRent)} / month · Agreed deposit {formatINR(h.securityDeposit)}</div>
               {h.moveOutNotes ? <div className="text-small text-ink-muted">{h.moveOutNotes}</div> : null}
             </Card>
           ))}

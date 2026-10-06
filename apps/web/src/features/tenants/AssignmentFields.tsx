@@ -5,7 +5,7 @@ import { Card, DateInput, EmptyState, Field, Icon, Input, MoneyInput, Segmented,
 import { useProperty } from '@/features/properties/PropertyProvider';
 import { useRooms } from '@/features/rooms/api';
 import { cn } from '@/utils/cn';
-import { formatINR } from '@/utils/format';
+import { formatINR, today } from '@/utils/format';
 import type { Room } from '@rental/shared';
 import type { TenantForm } from './schemas';
 
@@ -52,11 +52,20 @@ export function RoomPicker() {
 export function RentFields({ showMoveIn = true }: { showMoveIn?: boolean }) {
   const { control, register, formState: { errors } } = useFormContext<TenantForm>();
   const mode = useWatch({ control, name: 'electricityMode' });
+  const depositReceived = useWatch({ control, name: 'depositReceived' });
   return (
     <div className="space-y-4">
       {showMoveIn ? <DateInput label="Move-in Date" error={errors.startDate?.message} {...register('startDate')} /> : null}
       <MoneyInput label="Monthly Rent" error={errors.agreedRent?.message} {...register('agreedRent')} />
-      <MoneyInput label="Security Deposit" hint="Optional" error={errors.securityDeposit?.message} {...register('securityDeposit')} />
+      <MoneyInput label="Agreed Security Deposit" hint="Optional" error={errors.securityDeposit?.message} {...register('securityDeposit')} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <MoneyInput label="Deposit Received" hint="Optional. Amount already received" error={errors.depositReceived?.message} {...register('depositReceived')} />
+        {depositReceived && Number(depositReceived) > 0 ? <DateInput label="Received On" max={today()} error={errors.depositReceivedOn?.message} {...register('depositReceivedOn')} /> : null}
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <DateInput label="Agreement Start Date" hint="Optional" error={errors.agreementStartDate?.message} {...register('agreementStartDate')} />
+        <DateInput label="Agreement End Date" hint="Optional. Shows a green tick until this date" error={errors.agreementEndDate?.message} {...register('agreementEndDate')} />
+      </div>
       <Field label="Electricity">
         <Controller control={control} name="electricityMode" render={({ field }) => <Segmented value={field.value} onChange={field.onChange} options={[{ value: 'METER', label: 'Meter' }, { value: 'FIXED', label: 'Fixed' }, { value: 'NONE', label: 'None' }]} />} />
       </Field>
