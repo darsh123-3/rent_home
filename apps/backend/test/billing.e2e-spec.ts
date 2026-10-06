@@ -90,7 +90,7 @@ describe('Billing (e2e)', () => {
   });
 
   it('generates the September bill; items always add up to the total', async () => {
-    const res = await owner.post('/bills', septemberBody({ dueDate: '2026-09-10' })).expect(201); // explicit date so the bill is already overdue
+    const res = await owner.post('/bills', septemberBody({ dueDate: '2026-10-01' })).expect(201); // explicit date so the bill is already overdue
     const b = res.body.data;
     sepBillId = b.id;
     expect(b).toMatchObject({ billNumber: 'SUN-202609-0001', status: 'OVERDUE', storedStatus: 'GENERATED', totalDue: 9900, paidAmount: 0, balance: 9900 });

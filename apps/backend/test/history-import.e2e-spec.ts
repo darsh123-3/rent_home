@@ -46,6 +46,10 @@ describe('Excel history import (e2e)', () => {
     expect(Number(june.previousBalance)).toBe(800);
     expect(Number(june.totalDue)).toBe(5000 + 100 + 200 + 800);
     expect(may.billNumber < june.billNumber).toBe(true);
+    // Month M is issued on the 1st of M+1 and due on the due day of M+1, like bills made in the app.
+    const mayBill = (await owner.get(`/bills/${may.id}`)).body.data;
+    expect(mayBill).toMatchObject({ billPeriodStart: '2026-05-01', billPeriodEnd: '2026-05-31', issuedOn: '2026-06-01' });
+    expect(mayBill.dueDate.slice(0, 10)).toBe('2026-06-10');
   });
 
   it('shows a tenant who left but still owes money, and lets you collect it', async () => {

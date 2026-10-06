@@ -183,6 +183,34 @@ describe('Client requirements (e2e)', () => {
     await owner.post('/bills/preview', { ...base, charges: [{ type: 'WATER', amount: 1.001 }] }).expect(400);
   });
 
+  it('only lets a bill fall due after its billing month ends', async () => {
+    const base = { assignmentId, billingPeriod: '2026-09', electricity: { currentReading: 4400 } };
+    expect((await owner.post('/bills/preview', { ...base, dueDate: '2026-09-10' }).expect(400)).body.message).toBe('Due date must be after the billing month ends (30 Sep 2026)');
+    await owner.post('/bills/preview', { ...base, dueDate: '2026-09-30' }).expect(400);
+    expect((await owner.post('/bills/preview', { ...base, dueDate: '2026-10-01' }).expect(200)).body.data.dueDate.slice(0, 10)).toBe('2026-10-01');
+    expect((await owner.post('/bills/preview', base).expect(200)).body.data.dueDate.slice(0, 10)).toBe('2026-10-10'); // default: due day of the next month
+  });
+
+  it('moves imported bills to next-month due and issue dates, once, without touching app bills', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const sql = fs.readFileSync(path.resolve(__dirname, '../../../prisma/migrations/20261009000000_fix_imported_bill_dates/migration.sql'), 'utf8');
+    const run = async () => { for (const stmt of sql.replace(/--.*$/gm, '').split(';').map((s) => s.trim()).filter(Boolean)) await prisma.$executeRawUnsafe(stmt); };
+    const make = (billNumber: string, month: string, notes: string | null) => prisma.bill.create({
+      data: { billNumber, propertyId, assignmentId, tenantId, roomId, billingPeriod: d(`${month}-01`), dueDate: d(`${month}-10`), rentAmount: 1, electricityAmount: 0, otherChargesAmount: 0, totalDue: 1, notes, createdAt: d(`${month}-01`) },
+    });
+    const imported = await make('IMP-202605-0001', '2026-05', 'Imported from the Excel register.');
+    const dec = await make('IMP-202512-0001', '2025-12', 'Imported from the Excel register. Adjusted.');
+    const appBill = await make('APP-202604-0001', '2026-04', null);
+    await run();
+    await run(); // a second run changes nothing
+    const got = async (id: string) => (await owner.get(`/bills/${id}`).expect(200)).body.data;
+    expect(await got(imported.id)).toMatchObject({ dueDate: expect.stringMatching(/^2026-06-10/), issuedOn: '2026-06-01' });
+    expect(await got(dec.id)).toMatchObject({ dueDate: expect.stringMatching(/^2026-01-10/), issuedOn: '2026-01-01' }); // across the year end
+    expect(await got(appBill.id)).toMatchObject({ dueDate: expect.stringMatching(/^2026-04-10/) }); // not imported: untouched
+    expect((await got(imported.id)).totalDue).toBe(1);
+  });
+
   it('prints the new lines, bill period, landlord phone and the informational deposit line on one A4 page', async () => {
     const { text, pages } = await pdfText(owner, app, `/bills/${augBillId}/pdf`);
     expect(pages).toBe(1);

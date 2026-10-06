@@ -102,10 +102,13 @@ export async function writeHistory(prisma: PrismaClient, plan: HistoryPlan, o: H
     const discount = money(e.credit + e.deposit + Math.max(0, -e.adjustment));
     const other = money(e.societyElectricity + e.societyMaintenance + Math.max(0, e.adjustment));
     const status = e.paid >= e.total && e.total > 0 ? 'PAID' : e.paid > 0 ? 'PARTIALLY_PAID' : e.total === 0 ? 'PAID' : 'GENERATED';
-    const stamp = ymd(e.month, 1);
+    // Month M is billed after it ends (its electricity is only known then): issued on the 1st of M+1, due on the due day of M+1,
+    // exactly like bills generated in the app. A month that has not ended yet is stamped today.
+    const issued = ymd(nextMonth(e.month), 1);
+    const stamp = issued > today ? today : issued;
     bills.push({
       id, billNumber: billNumber.get(e)!, propertyId, assignmentId: assignmentId.get(f.stint)!, tenantId: tenantId.get(t.key)!, roomId: roomId.get(e.room)!,
-      billingPeriod: ymd(e.month), dueDate: ymd(e.month, o.dueDay), status,
+      billingPeriod: ymd(e.month), dueDate: ymd(nextMonth(e.month), o.dueDay), status,
       rentAmount: e.rent, electricityAmount: e.electricity, otherChargesAmount: other, lateFee: 0, discount, previousBalance: e.carried, totalDue: e.total, paidAmount: e.paid,
       notes: e.note ? `Imported from the Excel register. ${e.note}.` : 'Imported from the Excel register.', createdAt: stamp, updatedAt: stamp,
     });
