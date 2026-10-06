@@ -222,7 +222,8 @@ export default function GenerateBillScreen() {
                 <View className="flex-1"><Input label="Late fee" prefix="₹" keyboardType="decimal-pad" placeholder="0" value={lateFee} onChangeText={setLateFee} /></View>
                 <View className="flex-1"><Input label="Discount" prefix="₹" keyboardType="decimal-pad" placeholder="0" value={discount} onChangeText={setDiscount} /></View>
               </View>
-              <DateField label="Due Date" value={dueDate ?? data.dueDate.slice(0, 10)} onChange={setDueDate} />
+              <DateField label="Due Date" value={dueDate ?? data.dueDate.slice(0, 10)} onChange={setDueDate}
+                minimumDate={(() => { const [y, m] = (period ?? toYM(data.billingPeriod)).split('-').map(Number); return new Date(y, m, 1); })()} />
 
               <SectionHeader title="Summary" />
               <Card>

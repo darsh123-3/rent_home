@@ -4,6 +4,7 @@ import { agreementInfo } from '../common/agreement';
 import { AuditService } from '../common/audit.service';
 import { isoDate, localDateOf, monthBounds, monthStart, parseDate, todayLocal } from '../common/dates';
 import { depositSummaries } from '../common/deposits';
+import { formatDate } from '../common/format';
 import { OUTSTANDING_BILL_WHERE } from '../common/outstanding';
 import { paginate, skipTake } from '../common/pagination';
 import { PrismaService } from '../common/prisma.service';
@@ -155,7 +156,9 @@ export class BillsService {
 
     const totals = calculateBill({ rent, electricity: electricity.amount, charges, lateFee: dto.lateFee, discount: dto.discount, previousBalance });
     const dueDate = dto.dueDate ? parseDate(dto.dueDate, 'Due date') : new Date(Date.UTC(period.getUTCFullYear(), period.getUTCMonth() + 1, assignment.room.property.dueDayOfMonth)) // payable the month after the billing month;
-    if (dueDate < period) throw new BadRequestException('Due date cannot be before the billing month');
+    // The bill includes the month's electricity, which is only known once the month is over: it falls due after the month ends.
+    const periodEnd = monthBounds(period).end;
+    if (dueDate <= periodEnd) throw new BadRequestException(`Due date must be after the billing month ends (${formatDate(periodEnd)})`);
 
     return { draft: { assignment, period, dueDate, rent, electricity, charges, totals, carry, openingBalance, notes: dto.notes }, suggestedPeriod, needsReading };
   }

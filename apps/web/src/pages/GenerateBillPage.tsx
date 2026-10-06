@@ -10,7 +10,7 @@ import { useChangeElectricity } from '@/features/tenants/api';
 import { ChargeModal, type ChargeRow } from '@/features/bills/ChargeModal';
 import { useProperty } from '@/features/properties/PropertyProvider';
 import { useDebounced } from '@/hooks/useDebounced';
-import { formatDate, formatINR, formatYM, toYM } from '@/utils/format';
+import { formatDate, formatINR, formatYM, shiftMonth, toYM } from '@/utils/format';
 import { CHARGE_LABELS, isMonthlyCharge, MONTHLY_CHARGE_TYPES, type MonthlyChargeType, type Paginated, type TenantListItem } from '@rental/shared';
 
 /** One editable line per monthly category; blank or 0 leaves it off this bill. */
@@ -209,7 +209,8 @@ export function GenerateBillPage() {
                 <Input label="Late fee" prefix="₹" inputMode="decimal" placeholder="0" value={lateFee} onChange={(e) => setLateFee(e.target.value)} />
                 <Input label="Discount" prefix="₹" inputMode="decimal" placeholder="0" value={discount} onChange={(e) => setDiscount(e.target.value)} />
               </div>
-              <DateInput label="Due Date" value={dueDate ?? data.dueDate.slice(0, 10)} onChange={(e) => setDueDate(e.target.value)} />
+              <DateInput label="Due Date" min={`${shiftMonth(period ?? toYM(data.billingPeriod), 1)}-01`} hint="After the billing month ends: its electricity is billed once the month is over."
+                value={dueDate ?? data.dueDate.slice(0, 10)} onChange={(e) => setDueDate(e.target.value)} />
 
               <SectionHeader title="Summary" />
               <Card>

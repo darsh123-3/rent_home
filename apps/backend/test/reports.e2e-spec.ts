@@ -125,7 +125,7 @@ describe('Dashboard & reports (e2e)', () => {
     const rooms = (await owner.get(`/rooms?propertyId=${propertyId}&status=VACANT`)).body.data.items as { id: string; roomNumber: string }[];
     const room = rooms.find((r) => r.roomNumber === '103')!;
     const t = (await owner.post('/tenants', { fullName: 'Left Behind', phone: '9000000099', joiningDate: '2026-06-01', assignment: { roomId: room.id, startDate: '2026-06-01', agreedRent: 3000 } })).body.data;
-    await owner.post('/bills', { assignmentId: t.currentAssignment.id, billingPeriod: '2026-09', dueDate: '2026-09-10' }).expect(201);
+    await owner.post('/bills', { assignmentId: t.currentAssignment.id, billingPeriod: '2026-09', dueDate: '2026-10-01' }).expect(201);
     await owner.post(`/room-assignments/${t.currentAssignment.id}/move-out`, { moveOutDate: '2026-09-30' }).expect(200);
 
     const d = (await owner.get(`/dashboard?propertyId=${propertyId}&month=2026-09`).expect(200)).body.data;
