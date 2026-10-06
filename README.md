@@ -71,6 +71,21 @@ same signed, expiring links. **Production refuses to start without R2 configured
 - **Home KPIs**: collection of the month with its rent/electricity/other make-up, total outstanding (current vs former), overdue, due in 7 days, rent roll, occupancy and the rent lost to vacancy,
   collected in the last 7 days, tenants still to be billed this month, six-month trend and recent payments.
 
+### Bill period, monthly charges, deposits and agreements
+- **Dates follow India time.** "Today", "Issued on", payment and deposit dates use `APP_TIMEZONE` (default `Asia/Kolkata`), not the server clock (UTC on Render).
+  A bill's *Issued on* is the India day it was generated (`issuedOn` in the API, from `createdAt`).
+- **Bill period** is the billing month as a range, e.g. *01 Aug 2026 – 31 Aug 2026* (`billPeriodStart` / `billPeriodEnd`, computed, no column). Shown on every PDF, the bill screen and the Excel export.
+- **Monthly charges**: *Water bill*, *Housekeeping*, *MNGL fuel bill* and *WiFi connection* each get their own line, right after electricity and in that order (one line each per bill).
+  They are stored as charge types `WATER`, `CLEANING`, `MNGL_GAS` and `INTERNET` (so older "Cleaning"/"Internet" charges now show as Housekeeping/WiFi). On *Generate Bill* they are prefilled
+  from the tenant's recurring charges and can be changed for that bill; blank or 0 leaves the line off. MNGL can carry a short note (units or reading) printed on the bill.
+- **Security deposit**: the stay's *agreed* deposit plus every amount actually *received*, with its date (Tenant > Security deposit > Add deposit received, or at move-in).
+  Totals (received, pending, last received date) are computed. The deposit is printed on bills for information only and is **never** part of the amount due.
+  `GET/POST /room-assignments/:id/deposits`, `DELETE /room-assignments/:id/deposits/:receiptId`.
+- **Agreement**: optional start and end dates per stay (Add Tenant, Assign Room, Edit Tenant). A green tick shows while the agreement is valid (the end date included),
+  a red cross after the end date, grey before it starts. Shown on tenant cards, the tenant profile, the room screen and the bill screen for current tenants.
+- **Payment received date**: every payment row shows the date the money was received; a settled bill shows *Paid in full on …* and a part-paid bill *Last payment ₹… on …* (screen and PDF).
+- **Landlord phone** (optional, Bill Settings) is printed under the address on bills.
+
 ### Import an existing Excel register (full history)
 ```bash
 npm run db:import -- /path/to/RENT.xlsx --dry-run     # preview: tenants, rooms, dues, anything odd in the sheet
