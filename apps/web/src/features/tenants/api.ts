@@ -82,3 +82,8 @@ export function useDeleteDeposit(assignmentId: string) {
   const invalidate = useInvalidateCore();
   return useMutation({ mutationFn: (receiptId: string) => api.delete<SecurityDepositSummary>(`/room-assignments/${assignmentId}/deposits/${receiptId}`), onSuccess: invalidate });
 }
+/** Sets or corrects the agreed deposit of a stay (what the tenant should pay). */
+export function useSetAgreedDeposit(assignmentId: string) {
+  const invalidate = useInvalidateCore();
+  return useMutation({ mutationFn: (amount: number) => api.post<SecurityDepositSummary>(`/room-assignments/${assignmentId}/agreed-deposit`, { amount }), onSuccess: invalidate });
+}

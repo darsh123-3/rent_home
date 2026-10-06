@@ -137,6 +137,14 @@ describe('Client requirements (e2e)', () => {
 
     const listed = (await owner.get(`/room-assignments/${assignmentId}/deposits`).expect(200)).body.data;
     expect(listed).toMatchObject({ totalReceived: 15000, pending: 5000 });
+
+    // The agreed amount can be set or corrected later; pending follows, receipts stay.
+    expect((await owner.post(`/room-assignments/${assignmentId}/agreed-deposit`, { amount: 25000 }).expect(200)).body.data).toMatchObject({ agreed: 25000, totalReceived: 15000, pending: 10000 });
+    await owner.post(`/room-assignments/${assignmentId}/agreed-deposit`, { amount: -1 }).expect(400);
+    await owner.post(`/room-assignments/${assignmentId}/agreed-deposit`, { amount: 1.234 }).expect(400);
+    await other.post(`/room-assignments/${assignmentId}/agreed-deposit`, { amount: 1 }).expect(404);
+    expect(await prisma.auditLog.count({ where: { action: 'deposit.agreed_change', entityId: assignmentId } })).toBe(1);
+    await owner.post(`/room-assignments/${assignmentId}/agreed-deposit`, { amount: 20000 }).expect(200);
     expect((await owner.get(`/tenants/${tenantId}`)).body.data.securityDeposit).toMatchObject({ totalReceived: 15000, lastReceivedOn: '2026-01-20' });
   });
 

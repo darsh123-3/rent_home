@@ -5,7 +5,7 @@ import { isoDate, monthStart, parseDate, todayLocal } from '../common/dates';
 import { depositSummaries } from '../common/deposits';
 import { outstandingByTenant } from '../common/outstanding';
 import { PrismaService } from '../common/prisma.service';
-import { AssignmentTermsDto, ChangeElectricityDto, ChangeRentDto, CreateAssignmentDto, DepositReceiptDto, MoveOutDto } from './assignments.dto';
+import { AgreedDepositDto, AssignmentTermsDto, ChangeElectricityDto, ChangeRentDto, CreateAssignmentDto, DepositReceiptDto, MoveOutDto } from './assignments.dto';
 
 type Tx = Prisma.TransactionClient;
 
@@ -192,6 +192,14 @@ export class AssignmentsService {
   async deposits(userId: string, id: string) {
     await this.ownedAssignment(userId, id);
     return (await depositSummaries(this.prisma, [id])).get(id)!;
+  }
+
+  /** Sets or corrects the agreed deposit of a stay. Receipts are untouched; pending is worked out again. */
+  async setAgreedDeposit(userId: string, id: string, dto: AgreedDepositDto) {
+    const a = await this.ownedAssignment(userId, id);
+    await this.prisma.roomAssignment.update({ where: { id }, data: { securityDeposit: dto.amount } });
+    await this.audit.log(userId, 'deposit.agreed_change', 'room_assignment', id, { from: a.securityDeposit.toNumber(), to: dto.amount });
+    return this.deposits(userId, id);
   }
 
   async addDeposit(userId: string, id: string, dto: DepositReceiptDto) {

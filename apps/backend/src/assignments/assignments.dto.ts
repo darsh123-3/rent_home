@@ -25,6 +25,11 @@ export class AssignmentTermsDto {
   @IsOptional() @IsEnum(PaymentMethod, { message: 'Choose a valid payment method' }) depositMethod?: PaymentMethod;
 }
 
+/** The deposit agreed for the stay (what the tenant should pay), separate from what was received. */
+export class AgreedDepositDto {
+  @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }, { message: 'Amount must have at most 2 decimals' }) @Min(0, { message: 'Agreed deposit cannot be negative' }) amount: number;
+}
+
 /** One instalment of the security deposit. */
 export class DepositReceiptDto {
   @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }, { message: 'Amount must have at most 2 decimals' }) @IsPositive({ message: 'Deposit amount must be more than zero' }) amount: number;

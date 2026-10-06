@@ -6,11 +6,12 @@ import { Button, Card, Chip, ConfirmDialog, DateField, DetailRow, Icon, Input, S
 import { METHODS, METHOD_LABEL } from '@/features/payments/constants';
 import type { PaymentMethod, SecurityDepositSummary } from '@/types/api';
 import { formatDate, formatINR, today } from '@/utils/format';
-import { useAddDeposit, useDeleteDeposit } from './api';
+import { useAddDeposit, useDeleteDeposit, useSetAgreedDeposit } from './api';
 
 /** Agreed deposit, what was actually received (with dates) and what is still pending. Informational: never billed. */
 export function SecurityDepositSection({ deposit }: { deposit: SecurityDepositSummary }) {
   const [adding, setAdding] = useState(false);
+  const [editingAgreed, setEditingAgreed] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const del = useDeleteDeposit(deposit.assignmentId);
@@ -20,6 +21,9 @@ export function SecurityDepositSection({ deposit }: { deposit: SecurityDepositSu
       <SectionHeader title="Security deposit" actionLabel={none ? undefined : 'Add received'} onAction={none ? undefined : () => setAdding(true)} />
       <Card>
         <DetailRow label="Agreed security deposit" value={formatINR(deposit.agreed)} />
+        <Pressable onPress={() => setEditingAgreed(true)} accessibilityRole="button" hitSlop={8} className="-mt-1 mb-1 self-end">
+          <Text variant="secondaryMedium" tone="primary">{deposit.agreed > 0 ? 'Edit agreed deposit' : 'Add agreed deposit'}</Text>
+        </Pressable>
         <DetailRow label="Total received" value={none ? 'Not recorded' : formatINR(deposit.totalReceived)} tone={none ? undefined : 'success'} strong={!none} />
         <DetailRow label="Pending" value={formatINR(deposit.pending)} tone={deposit.pending > 0 ? 'danger' : undefined} last={none} />
         {deposit.receipts.map((r, i) => (
@@ -37,10 +41,36 @@ export function SecurityDepositSection({ deposit }: { deposit: SecurityDepositSu
       {none ? <View className="mt-3"><Button label="Add deposit received" icon={Plus} variant="secondary" onPress={() => setAdding(true)} /></View> : null}
       {error ? <Text tone="danger" variant="secondary" className="mt-2">{error}</Text> : null}
       <AddDepositSheet assignmentId={deposit.assignmentId} visible={adding} onClose={() => setAdding(false)} />
+      <AgreedDepositSheet key={`${deposit.assignmentId}-${deposit.agreed}`} assignmentId={deposit.assignmentId} current={deposit.agreed} visible={editingAgreed} onClose={() => setEditingAgreed(false)} />
       <ConfirmDialog visible={!!removing} title="Delete this deposit entry?" message="Use this only to correct a mistake. The totals are worked out again from the remaining entries." confirmLabel="Delete" destructive loading={del.isPending}
         onConfirm={async () => { try { await del.mutateAsync(removing!); setRemoving(null); } catch (e) { setRemoving(null); setError(friendlyError(e)); } }}
         onCancel={() => setRemoving(null)} />
     </>
+  );
+}
+
+/** Sets or corrects the agreed deposit. Amounts already received are kept; pending is worked out again. */
+function AgreedDepositSheet({ assignmentId, current, visible, onClose }: { assignmentId: string; current: number; visible: boolean; onClose: () => void }) {
+  const save = useSetAgreedDeposit(assignmentId);
+  const [amount, setAmount] = useState(current > 0 ? String(current) : '');
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    if (!/^(\d+(\.\d{1,2})?)?$/.test(amount.trim())) return setError('Enter a valid amount');
+    setError(null);
+    try {
+      await save.mutateAsync(amount.trim() === '' ? 0 : Number(amount));
+      onClose();
+    } catch (e) { setError(friendlyError(e)); }
+  };
+  return (
+    <Sheet visible={visible} title="Agreed security deposit" onClose={onClose}>
+      <View className="gap-4 pb-4">
+        <Input label="Agreed amount" prefix="₹" keyboardType="decimal-pad" placeholder="0" value={amount} onChangeText={setAmount}
+          hint="The deposit the tenant agreed to pay. Record money actually received with Add deposit received." />
+        {error ? <Text tone="danger" variant="secondary">{error}</Text> : null}
+        <Button label="Save" onPress={submit} loading={save.isPending} />
+      </View>
+    </Sheet>
   );
 }
 

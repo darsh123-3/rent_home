@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { AuthUser, CurrentUser, ResponseMessage } from '../common/decorators';
-import { ChangeElectricityDto, ChangeRentDto, CreateAssignmentDto, DepositReceiptDto, MoveOutDto } from './assignments.dto';
+import { AgreedDepositDto, ChangeElectricityDto, ChangeRentDto, CreateAssignmentDto, DepositReceiptDto, MoveOutDto } from './assignments.dto';
 import { AssignmentsService } from './assignments.service';
 
 @Controller('room-assignments')
@@ -43,6 +43,13 @@ export class AssignmentsController {
   @Get(':id/deposits')
   deposits(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.deposits(u.userId, id);
+  }
+
+  @Post(':id/agreed-deposit')
+  @HttpCode(200)
+  @ResponseMessage('Agreed deposit updated')
+  setAgreedDeposit(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AgreedDepositDto) {
+    return this.service.setAgreedDeposit(u.userId, id, dto);
   }
 
   @Post(':id/deposits')

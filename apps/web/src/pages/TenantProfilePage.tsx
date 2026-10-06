@@ -12,7 +12,7 @@ import { ChangeRentModal } from '@/features/tenants/ChangeRentModal';
 import { ElectricityHistory } from '@/features/tenants/ElectricityHistory';
 import { AgreementBadge } from '@/features/tenants/AgreementBadge';
 import { ElectricityModal } from '@/features/tenants/ElectricityModal';
-import { SecurityDepositCard } from '@/features/tenants/SecurityDepositCard';
+import { AgreedDepositModal, SecurityDepositCard } from '@/features/tenants/SecurityDepositCard';
 import { telUrl, whatsappUrl } from '@/features/tenants/contact';
 import { formatDate, formatINR, formatMonthShort } from '@/utils/format';
 
@@ -25,6 +25,7 @@ export function TenantProfilePage() {
   const [section, setSection] = useState<Section>('Overview');
   const [rentOpen, setRentOpen] = useState(false);
   const [elecOpen, setElecOpen] = useState(false);
+  const [depositOpen, setDepositOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -59,7 +60,12 @@ export function TenantProfilePage() {
         <>
           <Card className="mt-4">
             <DetailRow label="Monthly Rent" value={summary ? formatINR(summary.agreedRent) : '-'} />
-            <DetailRow label="Agreed security deposit" value={summary ? formatINR(summary.securityDeposit) : '-'} />
+            <DetailRow label="Agreed security deposit" value={summary ? (
+              <span className="flex items-center gap-3">
+                {formatINR(summary.securityDeposit)}
+                <button type="button" onClick={() => setDepositOpen(true)} className="text-small font-medium text-primary">{Number(summary.securityDeposit) > 0 ? 'Edit' : 'Add'}</button>
+              </span>
+            ) : '-'} />
             {a ? <DetailRow label="Agreement" value={a.agreementStartDate || a.agreementEndDate ? `${a.agreementStartDate ? formatDate(a.agreementStartDate) : '...'} to ${a.agreementEndDate ? formatDate(a.agreementEndDate) : '...'}` : 'Dates not added'} /> : null}
             {a ? (
               <div className="flex min-h-11 items-center justify-between gap-4 border-b border-line py-2.5">
@@ -135,6 +141,7 @@ export function TenantProfilePage() {
         onConfirm={async () => { try { await del.mutateAsync(); setDeleting(false); navigate('/tenants', { replace: true }); } catch (e) { setDeleting(false); setDeleteError(friendlyError(e)); } }}
         onCancel={() => setDeleting(false)} />
       {a && elecOpen ? <ElectricityModal open onClose={() => setElecOpen(false)} assignmentId={a.id} mode={a.electricityMode} ratePerUnit={a.ratePerUnit} fixedElectricity={a.fixedElectricity} /> : null}
+      {summary && depositOpen ? <AgreedDepositModal assignmentId={summary.id} current={Number(summary.securityDeposit)} onClose={() => setDepositOpen(false)} /> : null}
       {a && rentOpen ? <ChangeRentModal open onClose={() => setRentOpen(false)} assignmentId={a.id} currentRent={a.agreedRent} startDate={a.startDate} /> : null}
     </Page>
   );
