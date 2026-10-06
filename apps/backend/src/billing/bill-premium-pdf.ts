@@ -1,8 +1,9 @@
 import * as path from 'path';
 import PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
+import { todayLocal } from '../common/dates';
 import { formatDate, formatDateLocal, formatINR } from '../common/format';
-import type { PdfBill } from './bill-pdf';
+import { billPeriodLabel, depositLine, paymentDateLine, type PdfBill } from './bill-pdf';
 import { monthLabel } from './bills.service';
 
 const FONT_DIR = path.resolve(__dirname, '../../assets/fonts');
@@ -50,7 +51,10 @@ export function breakdownLines(bill: PdfBill): Line[] {
               ? 'Amount as recorded'
               : '';
       lines.push({ label: 'Electricity', detail, amount: i.amount });
-    } else if (i.type === 'CHARGE') lines.push({ label: i.description, detail: /society/i.test(i.description) ? 'Shared by all tenants' : '', amount: i.amount });
+    } else if (i.type === 'CHARGE') {
+      const note = typeof m.note === 'string' ? m.note : '';
+      lines.push({ label: i.description, detail: note || (/society/i.test(i.description) ? 'Shared by all tenants' : ''), amount: i.amount });
+    }
     else if (i.type === 'LATE_FEE') lines.push({ label: 'Late fee', detail: 'For payment after the due date', amount: i.amount });
     else if (i.type === 'DISCOUNT') lines.push({ label: i.description || 'Discount', detail: '', amount: i.amount, tone: 'success' });
     else if (i.type === 'PREVIOUS_BALANCE') {
@@ -69,8 +73,8 @@ export function breakdownLines(bill: PdfBill): Line[] {
 const signed = (n: number) => (n < 0 ? `-${formatINR(-n)}` : formatINR(n));
 
 /** The state shown on the hero card: what the reader should do. */
-export function heroState(bill: PdfBill, now = new Date()) {
-  const overdueDays = Math.max(0, Math.floor((now.getTime() - bill.dueDate.getTime()) / 86_400_000));
+export function heroState(bill: PdfBill, today = todayLocal()) {
+  const overdueDays = Math.max(0, Math.round((today.getTime() - bill.dueDate.getTime()) / 86_400_000));
   if (bill.status === 'CANCELLED') return { label: 'CANCELLED', amount: 'This bill was cancelled', sub: 'No payment is due.', tone: 'muted' as Tone };
   if (bill.balance <= 0) return { label: 'PAID IN FULL', amount: formatINR(0), sub: 'Thank you. Nothing is due.', tone: 'success' as Tone };
   if (bill.overdue || overdueDays > 0) return { label: 'BALANCE DUE', amount: formatINR(bill.balance), sub: `Overdue since ${formatDate(bill.dueDate)}${overdueDays ? ` (${overdueDays} ${overdueDays === 1 ? 'day' : 'days'})` : ''}`, tone: 'danger' as Tone };
@@ -135,8 +139,8 @@ export async function renderBillPremiumPdf(bill: PdfBill): Promise<Buffer> {
     const real = (v: string) => (v && !/^(-|address not set yet)$/i.test(v.trim()) ? v : '');
     const addr = [real(bill.property.address), real(bill.property.city)].filter(Boolean).join(', ');
     const area = [real(bill.property.state), bill.property.pincode && bill.property.pincode !== '000000' ? bill.property.pincode : ''].filter(Boolean).join(' - ');
-    if (addr) text(addr, M, 74, { size: 8.8, color: C.mint, width: CW * 0.58 });
-    if (area) text(area, M, 87, { size: 8.8, color: C.mint, width: CW * 0.58 });
+    const phone = bill.property.contactPhone?.trim() ? `Phone: ${bill.property.contactPhone.trim()}` : '';
+    [addr, area, phone].filter(Boolean).forEach((line, i) => text(line, M, 74 + i * 13, { size: 8.8, color: C.mint, width: CW * 0.58 }));
     caps('BILLING MONTH', M, 30, { color: '#99F0E1', width: CW, align: 'right' });
     text(monthLabel(bill.billingPeriod), M, 43, { font: 'B', size: 21, color: C.white, width: CW, align: 'right' });
     const st = bill.status === 'CANCELLED' ? { label: 'CANCELLED', tone: 'muted' as Tone } : bill.balance <= 0 ? { label: 'PAID', tone: 'success' as Tone } : state.tone === 'danger' ? { label: 'OVERDUE', tone: 'danger' as Tone } : bill.paidAmount > 0 ? { label: 'PARTIALLY PAID', tone: 'warning' as Tone } : { label: 'UNPAID', tone: 'warning' as Tone };
@@ -156,13 +160,17 @@ export async function renderBillPremiumPdf(bill: PdfBill): Promise<Buffer> {
     box(M + cw + 14, y, cw, cardH, 10, C.white, C.line);
     caps('BILL DETAILS', M + cw + 30, y + 14);
     const detail = (label: string, value: string, row: number) => {
-      text(label, M + cw + 30, y + 32 + row * 14.5, { size: 8.8, color: C.muted, width: 90 });
-      text(value, M + cw + 30 + 80, y + 31.5 + row * 14.5, { font: 'S', size: 9.2, width: cw - 126, align: 'right' });
+      text(label, M + cw + 30, y + 32 + row * 14.5, { size: 8.8, color: C.muted, width: 70 });
+      // Long values (the bill period range) step down in size rather than being cut off.
+      const room = cw - 116;
+      const size = Math.max(8, Math.min(9.2, (9.2 * room) / Math.max(1, width(value, 'S', 9.2))));
+      text(value, M + cw + 30 + 70, y + 31.5 + (9.2 - size) / 2 + row * 14.5, { font: 'S', size, width: room, align: 'right' });
     };
+    // Bill period · Issued on · Due date, read in that order.
     detail('Bill number', bill.billNumber, 0);
-    detail('Issued on', formatDateLocal(bill.createdAt), 1);
-    detail('Due date', formatDate(bill.dueDate), 2);
-    detail('Billing period', monthLabel(bill.billingPeriod), 3);
+    detail('Bill period', billPeriodLabel(bill.billingPeriod), 1);
+    detail('Issued on', formatDateLocal(bill.createdAt), 2);
+    detail('Due date', formatDate(bill.dueDate), 3);
 
     // ---------- Amount due ----------
     y += cardH + 12;
@@ -179,6 +187,8 @@ export async function renderBillPremiumPdf(bill: PdfBill): Promise<Buffer> {
       doc.opacity(0.9).roundedRect(rx + rwid / 2 - 52, y + 24, 104, 38, 8).lineWidth(2.4).stroke(C.success);
       text('PAID', rx + rwid / 2 - 52, y + 30, { font: 'B', size: 22, color: C.success, width: 104, align: 'center', spacing: 3 });
       doc.restore();
+      const paidOn = paymentDateLine(bill);
+      if (paidOn) text(paidOn, rx, y + 68, { font: 'S', size: 8.4, color: C.success, width: rwid, align: 'center' });
     } else if (bill.status !== 'CANCELLED') {
       const pct = bill.totalDue > 0 ? Math.min(1, bill.paidAmount / bill.totalDue) : 0;
       text('Paid so far', rx, y + 20, { size: 8.8, color: tone.fg, width: rwid });
@@ -186,6 +196,8 @@ export async function renderBillPremiumPdf(bill: PdfBill): Promise<Buffer> {
       box(rx, y + 40, rwid, 9, 4.5, C.white);
       if (pct > 0) box(rx, y + 40, Math.max(9, rwid * pct), 9, 4.5, tone.fg);
       text(pct > 0 ? `${Math.round(pct * 100)}% paid` : 'No payment received yet', rx, y + 56, { size: 8.4, color: tone.fg, width: rwid });
+      const last = paymentDateLine(bill);
+      if (last) text(last, rx, y + 68, { font: 'S', size: 8.4, color: tone.fg, width: rwid });
     }
 
     // ---------- Breakdown ----------
@@ -236,7 +248,14 @@ export async function renderBillPremiumPdf(bill: PdfBill): Promise<Buffer> {
       const colour = l.tone === 'danger' ? C.danger : l.tone === 'success' ? C.success : l.subtotal ? C.deep : C.ink;
       text(l.label, M + 14, y + (showDetail && l.detail ? 5.5 : (rowH - 11) / 2), { font: l.subtotal ? 'B' : 'S', size: 10.4, color: colour, width: CW - 150 });
       if (showDetail && l.detail) text(l.detail, M + 14, y + 18.5, { size: 8.4, color: C.muted, width: CW - 150 });
-      else if (l.detail) text(l.detail, M + 170, y + (rowH - 9) / 2 + 0.5, { size: 8.4, color: C.muted, width: CW - 300 });
+      else if (l.detail) {
+        // One line beside the label: step down a little, then shorten, so it never wraps into the next row.
+        const room = CW - 300;
+        const size = Math.max(7.4, Math.min(8.4, (8.4 * room) / Math.max(1, width(l.detail, 'R', 8.4))));
+        let detailText = l.detail;
+        while (detailText.length > 4 && width(detailText, 'R', size) > room) detailText = `${detailText.slice(0, -2).trimEnd()}…`;
+        text(detailText, M + 170, y + (rowH - size) / 2 + 0.5, { size, color: C.muted, width: room + 2 });
+      }
       text(signed(l.amount), M + CW - 124, y + (rowH - 11) / 2, { font: l.subtotal ? 'B' : 'S', size: 10.6, color: colour, width: 110, align: 'right' });
       y += rowH;
     });
@@ -276,6 +295,9 @@ export async function renderBillPremiumPdf(bill: PdfBill): Promise<Buffer> {
     box(tx - 8, ty - 2, 270, 30, 8, bt.bg, bt.line);
     text(bill.balance <= 0 ? 'Settled' : 'Balance due', tx + 4, ty + 8.5, { font: 'B', size: 10.6, color: bt.fg, width: 120 });
     text(formatINR(bill.balance), tx + 108, ty + 6.5, { font: 'B', size: 14, color: bt.fg, width: 142, align: 'right' });
+    // Informational only: the deposit is held, not billed, so it sits outside the totals.
+    const deposit = depositLine(bill);
+    if (deposit) text(deposit, tx - 8, ty + 42, { size: 8.2, color: C.soft, width: 270, align: 'right' });
     y += summaryH + 14;
 
     // ---------- Payments received ----------

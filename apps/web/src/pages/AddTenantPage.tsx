@@ -15,7 +15,7 @@ import { UploadQueue, type QueueItem } from '@/features/documents/UploadQueue';
 import { useProperty } from '@/features/properties/PropertyProvider';
 import { useCreateTenant } from '@/features/tenants/api';
 import { RentFields, RoomPicker } from '@/features/tenants/AssignmentFields';
-import { assignmentPayload, emptyTenantForm, STEP_FIELDS, tenantFormSchema, tenantPayload, type TenantForm } from '@/features/tenants/schemas';
+import { assignmentFieldErrors, assignmentPayload, emptyTenantForm, STEP_FIELDS, tenantFormSchema, tenantPayload, type TenantForm } from '@/features/tenants/schemas';
 import { cn } from '@/utils/cn';
 import { formatDate, formatINR, today } from '@/utils/format';
 import { toNumber } from '@/utils/validation';
@@ -62,7 +62,7 @@ export function AddTenantPage() {
   const [queueOpen, setQueueOpen] = useState(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
 
-  const form = useForm<TenantForm>({ resolver: zodResolver(tenantFormSchema), defaultValues: { ...emptyTenantForm, joiningDate: today(), startDate: today(), roomId: params.get('roomId') ?? '' }, mode: 'onTouched' });
+  const form = useForm<TenantForm>({ resolver: zodResolver(tenantFormSchema), defaultValues: { ...emptyTenantForm, joiningDate: today(), startDate: today(), depositReceivedOn: today(), roomId: params.get('roomId') ?? '' }, mode: 'onTouched' });
   const { control, trigger, getValues, handleSubmit, setError: setFieldError, register, formState: { errors } } = form;
   const watchedRoomId = useWatch({ control, name: 'roomId' });
   const name = STEPS[step];
@@ -71,6 +71,11 @@ export function AddTenantPage() {
   const next = async () => {
     if (!(await trigger(STEP_FIELDS[name]))) return;
     if (name === 'Rent & Deposit' && !getValues('agreedRent')) return setFieldError('agreedRent', { message: 'Enter the monthly rent' });
+    if (name === 'Rent & Deposit') {
+      const problems = assignmentFieldErrors(getValues());
+      problems.forEach((p) => setFieldError(p.field, { message: p.message }));
+      if (problems.length) return;
+    }
     setStep((s) => (name === 'Room' && !hasRoom() ? s + 2 : s + 1));
     window.scrollTo({ top: 0 });
   };
@@ -167,7 +172,9 @@ export function AddTenantPage() {
                   <>
                     <DetailRow label="Move-in" value={formatDate(v.startDate || v.joiningDate)} />
                     <DetailRow label="Monthly rent" value={formatINR(toNumber(v.agreedRent || '0'))} />
-                    <DetailRow label="Deposit" value={formatINR(toNumber(v.securityDeposit || '0'))} />
+                    <DetailRow label="Agreed deposit" value={formatINR(toNumber(v.securityDeposit || '0'))} />
+                    {toNumber(v.depositReceived || '0') > 0 ? <DetailRow label="Deposit received" value={`${formatINR(toNumber(v.depositReceived))} on ${formatDate(v.depositReceivedOn || today())}`} /> : null}
+                    {v.agreementStartDate || v.agreementEndDate ? <DetailRow label="Agreement" value={`${v.agreementStartDate ? formatDate(v.agreementStartDate) : '...'} to ${v.agreementEndDate ? formatDate(v.agreementEndDate) : '...'}`} /> : null}
                     {toNumber(v.openingBalance || '0') > 0 ? <DetailRow label="Outstanding from before" value={formatINR(toNumber(v.openingBalance))} /> : null}
                     <DetailRow label="Electricity" value={v.electricityMode === 'METER' ? `Meter, ${formatINR(toNumber(v.ratePerUnit || '0'))} / unit` : v.electricityMode === 'FIXED' ? `Fixed ${formatINR(toNumber(v.fixedElectricity || '0'))}` : 'Not charged'} last />
                   </>

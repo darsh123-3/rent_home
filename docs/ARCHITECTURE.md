@@ -20,6 +20,12 @@ The backend owns Supabase PostgreSQL (via Prisma) and the private Cloudflare R2 
   viewing returns a short-lived presigned GET URL after an auth check. No public URLs.
 - **PDF**: generated on the backend with PDFKit; mobile downloads it with Expo FileSystem and opens the native share sheet.
 - **Overdue** is computed at read time from `due_date`, so no cron is needed.
+- **Time zone**: every "today" on the server is `todayLocal()` (`common/dates.ts`), the calendar day in `APP_TIMEZONE` (default Asia/Kolkata) as a UTC-midnight
+  Date that compares directly with `DATE` columns. Never use the server clock's date: Render runs in UTC, which is still yesterday until 05:30 IST.
+- **Computed, not stored**: bill period (first to last day of `billing_period`), "issued on" (India day of `created_at`), deposit totals
+  (sum of `security_deposit_receipts`), agreement status (`agreement_start_date`/`agreement_end_date` against today), paid-in-full / last payment dates.
+- **Charge lines**: Water, Housekeeping (`CLEANING`), MNGL fuel (`MNGL_GAS`) and WiFi (`INTERNET`) are `CHARGE` bill items with `meta.chargeType`
+  (and an optional `meta.note`), ordered right after electricity and limited to one each per bill. They add to `other_charges_amount` like any charge.
 
 ## Phases (one commit per step)
 1. Foundation: monorepo, backend (config, Prisma, auth, sessions), mobile shell (theme, icons, tabs, persistent login)

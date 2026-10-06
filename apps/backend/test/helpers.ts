@@ -28,6 +28,19 @@ export async function createTestApp() {
   return { app, prisma: app.get(PrismaService), storage };
 }
 
+/**
+ * Moves the app's clock to a fixed instant so date rules (overdue, "today", issued on) are tested on known days.
+ * Only Date is faked; timers keep running and the clock keeps ticking from that instant.
+ */
+export function setClock(iso: string) {
+  jest.useFakeTimers({
+    now: new Date(iso),
+    advanceTimers: true,
+    doNotFake: ['hrtime', 'nextTick', 'performance', 'queueMicrotask', 'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'setImmediate', 'clearImmediate', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'],
+  });
+}
+export const resetClock = () => jest.useRealTimers();
+
 /** Wipes every table (TRUNCATE bypasses the append-only row triggers on purpose). */
 export async function resetDb(prisma: PrismaService) {
   const tables = await prisma.$queryRaw<{ tablename: string }[]>`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'`;

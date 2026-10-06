@@ -19,7 +19,7 @@ import type { Paginated, PaymentMethod, TenantListItem } from '@rental/shared';
 
 const schema = z.object({
   amount: moneyString('Amount'),
-  paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Select a date'),
+  paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Select the date the payment was received').refine((v) => v <= today(), 'Payment received date cannot be in the future'),
   method: z.enum(['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'OTHER']),
   reference: z.string().trim().max(100),
   notes: z.string().trim().max(500),
@@ -102,7 +102,7 @@ function PaymentForm({ billId, bill }: { billId: string; bill: BillSummary }) {
           <button type="button" onClick={() => setValue('amount', String(bill.balance), { shouldValidate: true })} className="text-small font-medium text-primary">Pay full balance</button>
           <span className={`text-small ${remaining < 0 ? 'text-danger' : 'text-ink-soft'}`}>{remaining < 0 ? 'More than balance' : `Remaining: ${formatINR(remaining)}`}</span>
         </div>
-        <DateInput label="Payment Date" error={errors.paymentDate?.message} {...register('paymentDate')} />
+        <DateInput label="Payment Received Date" max={today()} hint="The day the money was received" error={errors.paymentDate?.message} {...register('paymentDate')} />
         <Field label="Payment Method">
           <Controller control={control} name="method" render={({ field }) => (
             <div role="radiogroup" aria-label="Payment method" className="flex flex-wrap gap-2">

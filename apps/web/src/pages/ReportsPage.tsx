@@ -52,6 +52,12 @@ function CollectionTab({ propertyId, initialMonth }: { propertyId: string; initi
               <div className={`text-title ${d.pending > 0 ? 'text-danger' : 'text-success'}`}>{formatINR(d.pending)}</div>
               <div className="text-caption text-ink-muted">Includes balances carried over from earlier months.</div>
             </Card>
+            {d.byCategory?.some((c) => c.amount > 0) ? (
+              <>
+                <SectionHeader title={`Charges billed for ${d.monthLabel}`} />
+                <Card>{d.byCategory.map((c, i) => <DetailRow key={c.category} label={`${c.label}${c.count ? ` (${c.count})` : ''}`} value={c.amount > 0 ? formatINR(c.amount) : '-'} last={i === d.byCategory.length - 1} />)}</Card>
+              </>
+            ) : null}
           </div>
           <div>
             <SectionHeader title="Last 6 months" />

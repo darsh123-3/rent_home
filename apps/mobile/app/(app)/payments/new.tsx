@@ -19,7 +19,7 @@ import type { Paginated, PaymentMethod, TenantListItem } from '@/types/api';
 
 const schema = z.object({
   amount: moneyString('Amount'),
-  paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Select a date'),
+  paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Select the date the payment was received').refine((v) => v <= today(), 'Payment received date cannot be in the future'),
   method: z.enum(['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'OTHER']),
   reference: z.string().trim().max(100),
   notes: z.string().trim().max(500),
@@ -113,7 +113,7 @@ function PaymentForm({ billId, bill }: { billId: string; bill: { label: string; 
           <Text variant="secondary" tone={remaining < 0 ? 'danger' : 'soft'}>{remaining < 0 ? 'More than balance' : `Remaining: ${formatINR(remaining)}`}</Text>
         </View>
 
-        <Controller control={control} name="paymentDate" render={({ field, fieldState }) => <DateField label="Payment Date" value={field.value} onChange={field.onChange} error={fieldState.error?.message} />} />
+        <Controller control={control} name="paymentDate" render={({ field, fieldState }) => <DateField label="Payment Received Date" value={field.value} onChange={field.onChange} maximumDate={new Date()} error={fieldState.error?.message} />} />
 
         <View className="gap-1.5">
           <Text variant="label" tone="soft">Payment Method</Text>

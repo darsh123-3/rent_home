@@ -26,7 +26,7 @@ export interface BillRequest {
   billingPeriod?: string;
   dueDate?: string;
   electricity?: { currentReading?: number; previousReading?: number; overrideAmount?: number };
-  charges?: { type: string; name?: string; amount: number }[];
+  charges?: { type: string; name?: string; amount: number; note?: string }[];
   lateFee?: number;
   discount?: number;
   notes?: string;

@@ -7,7 +7,7 @@ import { friendlyError } from '@/api/client';
 import { Button, ErrorState, Header, Screen, SkeletonList, Text } from '@/components/ui';
 import { useAssignRoom, useTenant } from '@/features/tenants/api';
 import { RentFields, RoomPicker } from '@/features/tenants/AssignmentFields';
-import { assignmentPayload, emptyTenantForm, TenantForm, tenantFormSchema } from '@/features/tenants/schemas';
+import { assignmentFieldErrors, assignmentPayload, emptyTenantForm, TenantForm, tenantFormSchema } from '@/features/tenants/schemas';
 import { today } from '@/utils/format';
 
 export default function AssignRoomScreen() {
@@ -16,7 +16,7 @@ export default function AssignRoomScreen() {
   const { data: t, isLoading, isError, error, refetch } = useTenant(id);
   const assign = useAssignRoom();
   const [formError, setFormError] = useState<string | null>(null);
-  const form = useForm<TenantForm>({ resolver: zodResolver(tenantFormSchema.partial() as any), defaultValues: { ...emptyTenantForm, joiningDate: today(), startDate: today() } });
+  const form = useForm<TenantForm>({ resolver: zodResolver(tenantFormSchema.partial() as any), defaultValues: { ...emptyTenantForm, joiningDate: today(), startDate: today(), depositReceivedOn: today() } });
 
   const roomId = useWatch({ control: form.control, name: 'roomId' });
 
@@ -24,6 +24,9 @@ export default function AssignRoomScreen() {
     setFormError(null);
     if (!v.roomId) return setFormError('Choose a room');
     if (!v.agreedRent) return form.setError('agreedRent', { message: 'Enter the monthly rent' });
+    const problems = assignmentFieldErrors({ ...emptyTenantForm, ...v });
+    problems.forEach((p) => form.setError(p.field, { message: p.message }));
+    if (problems.length) return;
     try {
       await assign.mutateAsync({ tenantId: id, ...assignmentPayload(v) });
       router.replace({ pathname: '/tenants/[id]', params: { id } });

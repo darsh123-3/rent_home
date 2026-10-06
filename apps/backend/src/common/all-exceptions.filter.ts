@@ -2,6 +2,12 @@ import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logge
 import { Prisma } from '@prisma/client';
 import { Response } from 'express';
 
+/** Connection-level failures: cannot reach the server, connection timed out or dropped, no free connection in the pool, transaction could not start. */
+const UNAVAILABLE_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2028']);
+export const isDatabaseUnavailable = (e: unknown) =>
+  e instanceof Prisma.PrismaClientInitializationError ||
+  (e instanceof Prisma.PrismaClientKnownRequestError && UNAVAILABLE_CODES.has(e.code));
+
 /** Every error leaves the API as { success:false, message, errors? } - never a stack trace. */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -22,6 +28,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
         message = Array.isArray(body.message) ? body.message[0] : body.message ?? exception.message;
       }
       if (status === HttpStatus.TOO_MANY_REQUESTS) message = 'Too many requests. Please wait a moment and try again.';
+    } else if (isDatabaseUnavailable(exception)) {
+      // Could not get a database connection in time (slow network to the database, or its connection pool is full).
+      status = HttpStatus.SERVICE_UNAVAILABLE;
+      message = 'The database is not responding right now. Please try again in a moment.';
+      this.logger.error(`Database unavailable: ${(exception as { errorCode?: string; code?: string }).code ?? (exception as { errorCode?: string }).errorCode ?? (exception as Error).name}`);
     } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       switch (exception.code) {
         case 'P2002':

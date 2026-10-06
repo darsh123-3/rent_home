@@ -1,6 +1,6 @@
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { PrismaService } from '../src/common/prisma.service';
-import { createTestApp, createUserAndLogin, resetDb } from './helpers';
+import { createTestApp, createUserAndLogin, resetClock, resetDb, setClock } from './helpers';
 
 type Client = Awaited<ReturnType<typeof createUserAndLogin>>;
 
@@ -16,6 +16,7 @@ describe('Billing (e2e)', () => {
   let sepBillId: string;
 
   beforeAll(async () => {
+    setClock('2026-10-15T06:00:00Z'); // after the September bills fall due (10 Oct 2026)
     ({ app, prisma } = await createTestApp());
     await resetDb(prisma);
     owner = await createUserAndLogin(app, prisma, 'owner');
@@ -30,7 +31,7 @@ describe('Billing (e2e)', () => {
     tenantId = t.id;
     assignmentId = t.currentAssignment.id;
   });
-  afterAll(() => app.close());
+  afterAll(async () => { await app.close(); resetClock(); });
 
   const septemberBody = (extra: object = {}) => ({
     assignmentId, billingPeriod: '2026-09',
@@ -93,7 +94,8 @@ describe('Billing (e2e)', () => {
     const b = res.body.data;
     sepBillId = b.id;
     expect(b).toMatchObject({ billNumber: 'SUN-202609-0001', status: 'OVERDUE', storedStatus: 'GENERATED', totalDue: 9900, paidAmount: 0, balance: 9900 });
-    expect(b.items.map((i: any) => [i.type, i.amount])).toEqual([['RENT', 8000], ['ELECTRICITY', 1200], ['CHARGE', 500], ['CHARGE', 200]]);
+    // Water is one of the monthly lines, which come right after electricity; other charges follow.
+    expect(b.items.map((i: any) => [i.type, i.amount])).toEqual([['RENT', 8000], ['ELECTRICITY', 1200], ['CHARGE', 200], ['CHARGE', 500]]);
     expect(b.items.reduce((s: number, i: any) => s + i.amount, 0)).toBe(b.totalDue);
     expect(b.items[1].meta).toMatchObject({ previousReading: 1200, currentReading: 1350, units: 150, ratePerUnit: 8 });
     expect(b.tenant.fullName).toBe('Rahul Sharma');

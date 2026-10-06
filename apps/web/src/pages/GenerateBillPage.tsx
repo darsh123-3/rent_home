@@ -11,7 +11,11 @@ import { ChargeModal, type ChargeRow } from '@/features/bills/ChargeModal';
 import { useProperty } from '@/features/properties/PropertyProvider';
 import { useDebounced } from '@/hooks/useDebounced';
 import { formatDate, formatINR, formatYM, toYM } from '@/utils/format';
-import type { Paginated, TenantListItem } from '@rental/shared';
+import { CHARGE_LABELS, isMonthlyCharge, MONTHLY_CHARGE_TYPES, type MonthlyChargeType, type Paginated, type TenantListItem } from '@rental/shared';
+
+/** One editable line per monthly category; blank or 0 leaves it off this bill. */
+interface MonthlyRow { amount: string; name?: string; note: string }
+const emptyMonthly = (): Record<MonthlyChargeType, MonthlyRow> => ({ WATER: { amount: '', note: '' }, CLEANING: { amount: '', note: '' }, MNGL_GAS: { amount: '', note: '' }, INTERNET: { amount: '', note: '' } });
 
 const num = (s: string) => (s.trim() !== '' && /^\d+(\.\d{1,2})?$/.test(s.trim()) ? Number(s) : undefined);
 
@@ -27,6 +31,7 @@ export function GenerateBillPage() {
   const [rate, setRate] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
   const [manualAmount, setManualAmount] = useState('');
+  const [monthly, setMonthly] = useState(emptyMonthly);
   const [charges, setCharges] = useState<ChargeRow[]>([]);
   const [seeded, setSeeded] = useState(false);
   const [lateFee, setLateFee] = useState('');
@@ -51,10 +56,13 @@ export function GenerateBillPage() {
         ...(prevReading !== null && num(prevReading) !== undefined ? { previousReading: num(prevReading) } : {}),
         ...(rate !== null && num(rate) !== undefined ? { ratePerUnit: num(rate) } : {}),
       },
-      charges: charges.filter((c) => num(c.amount)).map((c) => ({ type: c.type, name: c.name, amount: Number(c.amount) })),
+      charges: [
+        ...MONTHLY_CHARGE_TYPES.filter((t) => num(monthly[t].amount)).map((t) => ({ type: t, name: monthly[t].name, amount: Number(monthly[t].amount), note: monthly[t].note.trim() || undefined })),
+        ...charges.filter((c) => num(c.amount)).map((c) => ({ type: c.type, name: c.name, amount: Number(c.amount) })),
+      ],
       lateFee: num(lateFee), discount: num(discount),
     };
-  }, [tenantId, period, dueDate, manual, reading, prevReading, rate, manualAmount, charges, lateFee, discount]);
+  }, [tenantId, period, dueDate, manual, reading, prevReading, rate, manualAmount, monthly, charges, lateFee, discount]);
 
   const debounced = useDebounced(request, 200);
   const preview = useBillPreview(debounced);
@@ -66,7 +74,15 @@ export function GenerateBillPage() {
   if (data && !seeded) {
     setSeeded(true);
     setPeriod(toYM(data.billingPeriod));
-    if (data.recurringCharges.length) setCharges(data.recurringCharges.map((c) => ({ type: c.type, name: c.name, amount: String(c.amount) })));
+    // Recurring Water / Housekeeping / MNGL / WiFi fill their own row (first one of each); anything else is an other charge.
+    const seed = emptyMonthly();
+    const others: ChargeRow[] = [];
+    for (const c of data.recurringCharges) {
+      if (isMonthlyCharge(c.type) && !seed[c.type].amount) seed[c.type] = { amount: String(c.amount), name: c.name, note: '' };
+      else others.push({ type: c.type, name: c.name, amount: String(c.amount) });
+    }
+    setMonthly(seed);
+    setCharges(others);
   }
 
   const el = data?.electricity;
@@ -88,12 +104,13 @@ export function GenerateBillPage() {
         elecP = Math.round(units * 100 * p(r) / 100);
       }
     }
-    const otherP = charges.reduce((sum, c) => sum + p(num(c.amount) ?? 0), 0);
+    // Same maths as the server: every charge line (monthly and other) adds to the total.
+    const otherP = MONTHLY_CHARGE_TYPES.reduce((sum, t) => sum + p(num(monthly[t].amount) ?? 0), 0) + charges.reduce((sum, c) => sum + p(num(c.amount) ?? 0), 0);
     const lateP = p(num(lateFee) ?? 0);
     const discP = p(num(discount) ?? 0);
     const gross = p(data.totals.rent) + elecP + otherP + lateP + p(data.totals.previousBalance);
     return { electricity: elecP / 100, units, rate: r, total: (gross - discP) / 100 };
-  }, [data, manual, manualAmount, reading, prevReading, rate, charges, lateFee, discount]);
+  }, [data, manual, manualAmount, reading, prevReading, rate, monthly, charges, lateFee, discount]);
   const previewError = preview.error ? (preview.error instanceof ApiError ? preview.error.message : friendlyError(preview.error)) : null;
   const needsReading = el?.mode === 'METER' && !manual && (el?.needsReading ?? true);
   const canGenerate = !!data && !previewError && !settling && !needsReading && !create.isPending;
@@ -108,7 +125,7 @@ export function GenerateBillPage() {
   };
 
   const tenantOptions = (tenantsQuery.data?.items ?? []).filter((t) => t.assignmentId).map((t) => ({ value: t.id, label: `${t.fullName} · Room ${t.room?.roomNumber}` }));
-  const reset = () => { setTenantId(undefined); setSeeded(false); setPeriod(undefined); setCharges([]); setReading(''); setPrevReading(null); setRate(null); };
+  const reset = () => { setTenantId(undefined); setSeeded(false); setPeriod(undefined); setMonthly(emptyMonthly()); setCharges([]); setReading(''); setPrevReading(null); setRate(null); };
 
   return (
     <Page title="Generate Bill" subtitle={current?.name} back>
@@ -153,9 +170,28 @@ export function GenerateBillPage() {
                 </Card>
               ) : null}
 
-              <SectionHeader title="Other Charges" action={<button type="button" onClick={() => setChargeModal(true)} className="text-small font-medium text-primary">Add</button>} />
+              <SectionHeader title="Monthly charges" />
+              <Card padded={false}>
+                {MONTHLY_CHARGE_TYPES.map((t, i) => {
+                  const row = monthly[t];
+                  const label = row.name ?? CHARGE_LABELS[t];
+                  const set = (patch: Partial<MonthlyRow>) => setMonthly((cur) => ({ ...cur, [t]: { ...cur[t], ...patch } }));
+                  return (
+                    <div key={t} className={`space-y-2 px-4 py-2 ${i < MONTHLY_CHARGE_TYPES.length - 1 ? 'border-b border-line' : ''}`}>
+                      <div className="flex items-center gap-2">
+                        <span className="flex-1 font-medium">{label}</span>
+                        <div className="w-32"><Input aria-label={`${label} amount`} prefix="₹" inputMode="decimal" placeholder="0" value={row.amount} onChange={(e) => set({ amount: e.target.value })} /></div>
+                      </div>
+                      {t === 'MNGL_GAS' && num(row.amount) ? <Input aria-label="MNGL note" placeholder="Units or reading (optional), printed on the bill" maxLength={60} value={row.note} onChange={(e) => set({ note: e.target.value })} /> : null}
+                    </div>
+                  );
+                })}
+              </Card>
+              <p className="-mt-2 text-caption text-ink-muted">Prefilled from the tenant's regular charges. Change an amount for this bill only; leave it blank or 0 to leave the line off.</p>
+
+              <SectionHeader title="Other charges" action={<button type="button" onClick={() => setChargeModal(true)} className="text-small font-medium text-primary">Add other charge</button>} />
               {charges.length === 0 ? (
-                <Card className="flex flex-col items-center gap-2 py-5"><span className="text-ink-soft">No other charges</span><Button variant="secondary" size="sm" full={false} icon={Plus} onClick={() => setChargeModal(true)}>Add Charge</Button></Card>
+                <Card className="flex flex-col items-center gap-2 py-5"><span className="text-ink-soft">No other charges</span><Button variant="secondary" size="sm" full={false} icon={Plus} onClick={() => setChargeModal(true)}>Add other charge</Button></Card>
               ) : (
                 <Card padded={false}>
                   {charges.map((c, i) => (
@@ -196,7 +232,8 @@ export function GenerateBillPage() {
           ) : preview.isLoading ? <div className="space-y-3"><Skeleton className="h-16" /><Skeleton className="h-28" /></div> : null}
         </div>
       )}
-      <ChargeModal open={chargeModal} onClose={() => setChargeModal(false)} onAdd={(row) => setCharges((cur) => [...cur, row])} />
+      <ChargeModal open={chargeModal} onClose={() => setChargeModal(false)}
+        onAdd={(row) => (isMonthlyCharge(row.type) ? setMonthly((cur) => ({ ...cur, [row.type]: { ...cur[row.type as MonthlyChargeType], amount: row.amount, name: row.name } })) : setCharges((cur) => [...cur, row]))} />
     </Page>
   );
 }

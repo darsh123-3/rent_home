@@ -14,7 +14,7 @@ export function PaymentRow({ payment, showTenant = true }: { payment: PaymentLis
           <div className="truncate font-medium">{showTenant ? payment.tenant.fullName : `${formatMonthShort(payment.bill.billingPeriod)} bill`}</div>
           <div className="truncate text-small text-ink-soft">{METHOD_LABEL[payment.method]} · Room {payment.bill.room.roomNumber}{payment.reference ? ` · ${payment.reference}` : ''}</div>
         </div>
-        <div className="text-right"><div className="text-heading text-success">{formatINR(payment.amount)}</div><div className="text-caption text-ink-muted">{formatShortDate(payment.paymentDate)}</div></div>
+        <div className="text-right"><div className="text-heading text-success">{formatINR(payment.amount)}</div><div className="text-caption text-ink-muted">Received {formatShortDate(payment.paymentDate)}</div></div>
       </Link>
     </Card>
   );

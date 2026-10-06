@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Badge, Card, DetailRow, ErrorState, Icon, LinkButton, SectionHeader, SkeletonList } from '@/components/ui';
 import { Page } from '@/components/layout/Page';
 import { useRoom } from '@/features/rooms/api';
+import { AgreementBadge } from '@/features/tenants/AgreementBadge';
 import { ROOM_STATUS } from '@/features/rooms/status';
 import { formatDate, formatINR, formatMonthShort } from '@/utils/format';
 
@@ -18,7 +19,7 @@ export function RoomDetailPage() {
       <Card>
         <div className="mb-1 flex items-center justify-between"><span className="text-caption text-ink-muted">STATUS</span><Badge label={status.label} tone={status.tone} /></div>
         <DetailRow label="Property" value={room.property.name} />
-        <DetailRow label="Current Tenant" value={tenant?.fullName ?? 'None'} />
+        <DetailRow label="Current Tenant" value={tenant ? <span className="flex flex-col items-end gap-0.5">{tenant.fullName}<AgreementBadge agreement={tenant} compact /></span> : 'None'} />
         <DetailRow label="Monthly Rent" value={formatINR(room.monthlyRent)} />
         <DetailRow label="Pending" value={tenant ? (room.balance > 0 ? formatINR(room.balance) : 'Paid') : '-'} tone={room.balance > 0 ? 'danger' : undefined} />
         <DetailRow label="Electricity" value={room.electricityMode === 'METER' ? `Meter, ${formatINR(room.ratePerUnit)} / unit` : room.electricityMode === 'FIXED' ? `Fixed ${formatINR(room.fixedElectricity)}` : 'Not charged'} last />

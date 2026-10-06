@@ -3,16 +3,18 @@ import { Banknote, CircleCheck, Link2 } from 'lucide-react-native';
 import { useState } from 'react';
 import { View } from 'react-native';
 import { friendlyError } from '@/api/client';
-import { Button, Card, ConfirmDialog, ErrorState, Header, Icon, Screen, SectionHeader, SkeletonList, Text } from '@/components/ui';
+import { Button, Card, ConfirmDialog, DetailRow, ErrorState, Header, Icon, Screen, SectionHeader, SkeletonList, Text } from '@/components/ui';
 import { useBill, useCancelBill } from '@/features/bills/api';
 import { BillActions } from '@/features/bills/BillActions';
 import { BillStatusBadge } from '@/features/bills/BillCard';
 import { METHOD_LABEL } from '@/features/payments/constants';
+import { AgreementBadge } from '@/features/tenants/AgreementBadge';
 import { formatDate, formatINR, formatMonth } from '@/utils/format';
 import type { BillItemRow } from '@/types/api';
 
 function itemLabel(i: BillItemRow) {
-  return i.type === 'ELECTRICITY' && i.meta?.currentReading != null ? `Electricity (${i.meta.units} units × ${formatINR(i.meta.ratePerUnit)})` : i.description;
+  if (i.type === 'ELECTRICITY' && i.meta?.currentReading != null) return `Electricity (${i.meta.units} units × ${formatINR(i.meta.ratePerUnit)})`;
+  return i.type === 'CHARGE' && typeof i.meta?.note === 'string' && i.meta.note ? `${i.description} (${i.meta.note})` : i.description;
 }
 
 export default function BillDetailScreen() {
@@ -62,7 +64,12 @@ export default function BillDetailScreen() {
           </View>
           <BillStatusBadge status={bill.status} />
         </View>
-        <Text variant="secondary" tone="muted">Due {formatDate(bill.dueDate)}</Text>
+        {!cancelled ? <AgreementBadge agreement={bill.agreement} compact /> : null}
+        <View className="border-t border-line">
+          <DetailRow label="Bill period" value={`${formatDate(bill.billPeriodStart)} – ${formatDate(bill.billPeriodEnd)}`} />
+          <DetailRow label="Issued on" value={formatDate(bill.issuedOn)} />
+          <DetailRow label="Due date" value={formatDate(bill.dueDate)} tone={bill.status === 'OVERDUE' ? 'danger' : undefined} last />
+        </View>
       </Card>
 
       <SectionHeader title="Charges" />
@@ -77,7 +84,16 @@ export default function BillDetailScreen() {
           <View className="flex-row items-center justify-between"><Text variant="heading">Total</Text><Text variant="title">{formatINR(bill.totalDue)}</Text></View>
           <View className="flex-row items-center justify-between"><Text tone="soft">Paid</Text><Text variant="bodyMedium" tone="success">{formatINR(bill.paidAmount)}</Text></View>
           <View className="flex-row items-center justify-between"><Text tone="soft">Balance</Text><Text variant="heading" tone={bill.balance > 0 && !bill.carriedInto ? 'danger' : 'ink'}>{formatINR(bill.balance)}</Text></View>
+          {!cancelled && bill.paidInFullOn ? (
+            <View className="flex-row items-center justify-end gap-1.5"><Icon icon={CircleCheck} size="sm" tone="success" /><Text variant="secondaryMedium" tone="success">Paid in full on {formatDate(bill.paidInFullOn)}</Text></View>
+          ) : null}
+          {!cancelled && bill.lastPayment ? <Text variant="secondary" tone="soft" className="text-right">Last payment {formatINR(bill.lastPayment.amount)} on {formatDate(bill.lastPayment.paymentDate)}</Text> : null}
         </View>
+        {bill.securityDeposit ? (
+          <Text variant="secondary" tone="soft" className="mt-3 border-t border-line pt-2">
+            Security deposit received: {formatINR(bill.securityDeposit.totalReceived)}{bill.securityDeposit.lastReceivedOn ? ` (last received ${formatDate(bill.securityDeposit.lastReceivedOn)})` : ''}. Not part of this bill.
+          </Text>
+        ) : null}
       </Card>
 
       {!cancelled ? (
@@ -99,7 +115,7 @@ export default function BillDetailScreen() {
               <View key={p.id} className={`flex-row items-center justify-between px-4 py-3 ${i < bill.payments.length - 1 ? 'border-b border-line' : ''}`}>
                 <View className="flex-1 pr-3">
                   <Text variant="bodyMedium">{METHOD_LABEL[p.method]}</Text>
-                  <Text variant="secondary" tone="soft">{formatDate(p.paymentDate)}{p.reference ? ` · ${p.reference}` : ''}</Text>
+                  <Text variant="secondary" tone="soft">Received {formatDate(p.paymentDate)}{p.reference ? ` · ${p.reference}` : ''}</Text>
                 </View>
                 <Text variant="heading" tone="success">{formatINR(p.amount)}</Text>
               </View>

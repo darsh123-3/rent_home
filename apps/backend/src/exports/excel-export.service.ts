@@ -2,7 +2,9 @@ import { Injectable } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import { effectiveStatus } from '../billing/bills.service';
 import { AuditService } from '../common/audit.service';
-import { todayUtc } from '../common/dates';
+import { isoDate, localDateOf, monthBounds, todayLocal } from '../common/dates';
+import { chargesByCategory } from '../common/charges';
+import { depositSummaries } from '../common/deposits';
 import { PrismaService } from '../common/prisma.service';
 import { PropertiesService } from '../properties/properties.service';
 
@@ -10,6 +12,9 @@ const num = (v: { toNumber(): number } | number | null | undefined) => (v == nul
 const metaNum = (v: unknown) => (typeof v === 'number' ? v : null);
 const STATUS_LABEL: Record<string, string> = { DRAFT: 'Draft', GENERATED: 'Unpaid', PARTIALLY_PAID: 'Partially paid', PAID: 'Paid', OVERDUE: 'Overdue', CANCELLED: 'Cancelled' };
 const METHOD_LABEL: Record<string, string> = { CASH: 'Cash', UPI: 'UPI', BANK_TRANSFER: 'Bank transfer', CARD: 'Card', OTHER: 'Other' };
+
+/** YYYY-MM-DD -> a UTC-midnight Date that Excel shows as that day. */
+const excelDate = (iso?: string | null) => (iso ? new Date(`${iso}T00:00:00.000Z`) : null);
 
 type Col = { header: string; key: string; width: number; fmt?: 'money' | 'date' | 'int' | 'rate' | 'month' };
 const FORMAT = { money: '#,##0.00;[Red]-#,##0.00', date: 'dd-mmm-yyyy', int: '#,##0', rate: '#,##0.00', month: 'mmm yyyy' };
@@ -50,7 +55,7 @@ export class ExcelExportService {
   async build(userId: string, propertyId?: string): Promise<{ buffer: Buffer; fileName: string }> {
     const ids = propertyId ? [(await this.properties.assertOwned(userId, propertyId)).id] : await this.properties.ownedIds(userId);
     const inProp = { propertyId: { in: ids } };
-    const today = todayUtc();
+    const today = todayLocal();
     const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
     const nextMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
 
@@ -62,7 +67,7 @@ export class ExcelExportService {
       }),
       this.prisma.tenant.findMany({
         relationLoadStrategy: 'join', where: { ...inProp, deletedAt: null }, orderBy: [{ status: 'asc' }, { fullName: 'asc' }],
-        include: { property: { select: { name: true } }, assignments: { orderBy: { startDate: 'desc' }, select: { status: true, startDate: true, endDate: true, agreedRent: true, securityDeposit: true, room: { select: { roomNumber: true } } } } },
+        include: { property: { select: { name: true } }, assignments: { orderBy: { startDate: 'desc' }, select: { id: true, status: true, startDate: true, endDate: true, agreedRent: true, securityDeposit: true, room: { select: { roomNumber: true } } } } },
       }),
       this.prisma.roomAssignment.findMany({
         relationLoadStrategy: 'join', where: { room: inProp }, orderBy: [{ startDate: 'asc' }],
@@ -78,6 +83,7 @@ export class ExcelExportService {
       }),
     ]);
 
+    const deposits = await depositSummaries(this.prisma, assignments.map((a) => a.id));
     const monthBills = bills.filter((b) => b.billingPeriod >= monthStart && b.billingPeriod < nextMonth);
     const monthPayments = payments.filter((p) => p.paymentDate >= monthStart && p.paymentDate < nextMonth);
     const open = monthBills.filter((b) => b.status !== 'CANCELLED' && b.status !== 'DRAFT' && b.carriedForwardToId == null && b.totalDue.toNumber() > b.paidAmount.toNumber());
@@ -168,11 +174,14 @@ export class ExcelExportService {
     addTable(wb, 'Tenants', [
       { header: 'Name', key: 'name', width: 26 }, { header: 'Property', key: 'property', width: 20 }, { header: 'Status', key: 'status', width: 12 }, { header: 'Room', key: 'room', width: 10 },
       { header: 'Phone', key: 'phone', width: 16 }, { header: 'Email', key: 'email', width: 24 }, { header: 'Joined', key: 'joined', width: 13, fmt: 'date' }, { header: 'Left', key: 'left', width: 13, fmt: 'date' },
-      { header: 'Monthly rent', key: 'rent', width: 13, fmt: 'money' }, { header: 'Deposit', key: 'deposit', width: 12, fmt: 'money' }, { header: 'Outstanding', key: 'owes', width: 14, fmt: 'money' },
+      { header: 'Monthly rent', key: 'rent', width: 13, fmt: 'money' }, { header: 'Deposit agreed', key: 'deposit', width: 14, fmt: 'money' },
+      { header: 'Deposit received', key: 'depositReceived', width: 15, fmt: 'money' }, { header: 'Last deposit date', key: 'depositOn', width: 15, fmt: 'date' }, { header: 'Outstanding', key: 'owes', width: 14, fmt: 'money' },
       { header: 'Emergency contact', key: 'emerg', width: 24 }, { header: 'Address', key: 'address', width: 34 }, { header: 'Notes', key: 'notes', width: 34 },
     ], tenants.map((t) => {
       const a = t.assignments.find((x) => x.status === 'ACTIVE') ?? t.assignments[0];
+      const dep = a ? deposits.get(a.id) : undefined;
       return {
+        depositReceived: dep?.totalReceived ?? 0, depositOn: excelDate(dep?.lastReceivedOn),
         name: t.fullName, property: t.property.name, status: t.status === 'ACTIVE' ? 'Current' : 'Moved out', room: a?.room.roomNumber ?? '', phone: t.phone, email: t.email, joined: t.joiningDate,
         left: t.status === 'ACTIVE' ? null : a?.endDate ?? null, rent: num(a?.agreedRent), deposit: num(a?.securityDeposit), owes: balance.get(t.id) ?? 0,
         emerg: [t.emergencyContact, t.emergencyPhone].filter(Boolean).join(' '), address: t.currentAddress ?? t.permanentAddress, notes: t.notes,
@@ -182,29 +191,39 @@ export class ExcelExportService {
     // ---- Stays
     addTable(wb, 'Stays', [
       { header: 'Tenant', key: 'tenant', width: 26 }, { header: 'Property', key: 'property', width: 20 }, { header: 'Room', key: 'room', width: 10 }, { header: 'From', key: 'from', width: 13, fmt: 'date' },
-      { header: 'To', key: 'to', width: 13, fmt: 'date' }, { header: 'Status', key: 'status', width: 10 }, { header: 'Rent', key: 'rent', width: 12, fmt: 'money' }, { header: 'Deposit', key: 'deposit', width: 12, fmt: 'money' },
+      { header: 'To', key: 'to', width: 13, fmt: 'date' }, { header: 'Status', key: 'status', width: 10 }, { header: 'Rent', key: 'rent', width: 12, fmt: 'money' }, { header: 'Deposit agreed', key: 'deposit', width: 14, fmt: 'money' },
+      { header: 'Deposit received', key: 'depositReceived', width: 15, fmt: 'money' }, { header: 'Last deposit date', key: 'depositOn', width: 15, fmt: 'date' },
+      { header: 'Agreement start', key: 'agreementStart', width: 15, fmt: 'date' }, { header: 'Agreement end', key: 'agreementEnd', width: 15, fmt: 'date' },
       { header: 'Electricity', key: 'mode', width: 12 }, { header: 'Rate per unit', key: 'rate', width: 13, fmt: 'rate' }, { header: 'Opening balance', key: 'opening', width: 15, fmt: 'money' }, { header: 'Notes', key: 'notes', width: 36 },
     ], assignments.map((a) => ({
       tenant: a.tenant.fullName, property: a.room.property.name, room: a.room.roomNumber, from: a.startDate, to: a.endDate, status: a.status === 'ACTIVE' ? 'Current' : 'Closed', rent: num(a.agreedRent),
-      deposit: num(a.securityDeposit), mode: a.electricityMode[0] + a.electricityMode.slice(1).toLowerCase(), rate: num(a.ratePerUnit), opening: num(a.openingBalance), notes: [a.notes, a.moveOutNotes].filter(Boolean).join(' | '),
+      deposit: num(a.securityDeposit), depositReceived: deposits.get(a.id)?.totalReceived ?? 0, depositOn: excelDate(deposits.get(a.id)?.lastReceivedOn),
+      agreementStart: a.agreementStartDate, agreementEnd: a.agreementEndDate, mode: a.electricityMode[0] + a.electricityMode.slice(1).toLowerCase(), rate: num(a.ratePerUnit), opening: num(a.openingBalance), notes: [a.notes, a.moveOutNotes].filter(Boolean).join(' | '),
     })));
 
     // ---- Bills
     addTable(wb, 'Bills', [
       { header: 'Month', key: 'month', width: 11, fmt: 'month' }, { header: 'Bill no', key: 'no', width: 18 }, { header: 'Property', key: 'property', width: 20 }, { header: 'Tenant', key: 'tenant', width: 26 },
-      { header: 'Room', key: 'room', width: 9 }, { header: 'Rent', key: 'rent', width: 12, fmt: 'money' }, { header: 'Electricity', key: 'elec', width: 12, fmt: 'money' }, { header: 'Other charges', key: 'other', width: 13, fmt: 'money' },
+      { header: 'Period start', key: 'periodStart', width: 13, fmt: 'date' }, { header: 'Period end', key: 'periodEnd', width: 13, fmt: 'date' }, { header: 'Issued on', key: 'issued', width: 13, fmt: 'date' },
+      { header: 'Room', key: 'room', width: 9 }, { header: 'Rent', key: 'rent', width: 12, fmt: 'money' }, { header: 'Electricity', key: 'elec', width: 12, fmt: 'money' },
+      { header: 'Water', key: 'water', width: 11, fmt: 'money' }, { header: 'Housekeeping', key: 'housekeeping', width: 13, fmt: 'money' }, { header: 'MNGL gas', key: 'gas', width: 11, fmt: 'money' },
+      { header: 'WiFi', key: 'wifi', width: 10, fmt: 'money' }, { header: 'Other charges', key: 'other', width: 13, fmt: 'money' },
       { header: 'Late fee', key: 'late', width: 10, fmt: 'money' }, { header: 'Discount', key: 'disc', width: 11, fmt: 'money' }, { header: 'Previous balance', key: 'prev', width: 15, fmt: 'money' },
       { header: 'Total', key: 'total', width: 13, fmt: 'money' }, { header: 'Paid', key: 'paid', width: 12, fmt: 'money' }, { header: 'Balance', key: 'bal', width: 13, fmt: 'money' },
       { header: 'Status', key: 'status', width: 14 }, { header: 'Due date', key: 'due', width: 13, fmt: 'date' }, { header: 'Balance carried to next bill', key: 'carried', width: 18 },
     ], monthBills.map((b) => {
       const total = b.totalDue.toNumber();
       const paid = b.paidAmount.toNumber();
+      const cat = chargesByCategory(b.items);
+      const period = monthBounds(b.billingPeriod);
       return {
-        month: b.billingPeriod, no: b.billNumber, property: b.property.name, tenant: b.tenant.fullName, room: b.room.roomNumber, rent: num(b.rentAmount), elec: num(b.electricityAmount), other: num(b.otherChargesAmount),
+        month: b.billingPeriod, no: b.billNumber, property: b.property.name, tenant: b.tenant.fullName, room: b.room.roomNumber, rent: num(b.rentAmount), elec: num(b.electricityAmount),
+        periodStart: period.start, periodEnd: period.end, issued: localDateOf(b.createdAt),
+        water: cat.WATER, housekeeping: cat.CLEANING, gas: cat.MNGL_GAS, wifi: cat.INTERNET, other: cat.OTHER,
         late: num(b.lateFee), disc: num(b.discount), prev: num(b.previousBalance), total, paid, bal: b.carriedForwardToId ? 0 : Math.round((total - paid) * 100) / 100,
         status: STATUS_LABEL[effectiveStatus({ status: b.status, dueDate: b.dueDate }, today)] ?? b.status, due: b.dueDate, carried: b.carriedForwardToId ? 'Yes' : '',
       };
-    }), ['rent', 'elec', 'other', 'late', 'disc']);
+    }), ['rent', 'elec', 'water', 'housekeeping', 'gas', 'wifi', 'other', 'late', 'disc']);
 
     // ---- Bill items
     addTable(wb, 'Bill items', [
@@ -214,7 +233,7 @@ export class ExcelExportService {
 
     // ---- Payments
     addTable(wb, 'Payments', [
-      { header: 'Date', key: 'date', width: 13, fmt: 'date' }, { header: 'Tenant', key: 'tenant', width: 26 }, { header: 'Room', key: 'room', width: 9 }, { header: 'For month', key: 'month', width: 11, fmt: 'month' },
+      { header: 'Received date', key: 'date', width: 14, fmt: 'date' }, { header: 'Tenant', key: 'tenant', width: 26 }, { header: 'Room', key: 'room', width: 9 }, { header: 'For month', key: 'month', width: 11, fmt: 'month' },
       { header: 'Bill no', key: 'no', width: 18 }, { header: 'Amount', key: 'amount', width: 13, fmt: 'money' }, { header: 'Method', key: 'method', width: 14 }, { header: 'Reference', key: 'ref', width: 20 },
       { header: 'Notes', key: 'notes', width: 40 }, { header: 'Property', key: 'property', width: 20 },
     ], monthPayments.map((p) => ({
@@ -278,7 +297,7 @@ export class ExcelExportService {
 
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
     await this.audit.log(userId, 'export.excel', 'property', propertyId, { bills: monthBills.length, payments: monthPayments.length });
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = isoDate(today);
     return { buffer, fileName: `RentManager-export-${stamp}.xlsx` };
   }
 }

@@ -8,6 +8,7 @@
  */
 import { Prisma, PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { todayLocal } from '../src/common/dates';
 import { HistoryPlan, PlanEntry, PlanStint, PlanTenant } from './history-plan';
 
 const money = (n: number) => Math.round(n * 100) / 100;
@@ -70,8 +71,7 @@ export async function wipeProperty(prisma: PrismaClient, propertyId: string) {
 }
 
 export async function writeHistory(prisma: PrismaClient, plan: HistoryPlan, o: HistoryWriteOptions): Promise<HistoryResult> {
-  const today = new Date();
-  const todayUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const today = todayLocal(); // India date: an import run just after midnight IST must not cap dates at yesterday
 
   const propertyId = randomUUID();
   const roomId = new Map(plan.rooms.map((r) => [r.number, randomUUID()]));
@@ -126,8 +126,8 @@ export async function writeHistory(prisma: PrismaClient, plan: HistoryPlan, o: H
     if (e.paid > 0) {
       const when = ymd(nextMonth(e.month), 10);
       payments.push({
-        billId: id, tenantId: tenantId.get(t.key)!, amount: e.paid, paymentDate: when > todayUtc ? todayUtc : when, method: 'OTHER', reference: 'IMPORTED',
-        notes: 'Derived from the Excel register (month total minus the balance carried into the next month).', createdAt: when > todayUtc ? todayUtc : when,
+        billId: id, tenantId: tenantId.get(t.key)!, amount: e.paid, paymentDate: when > today ? today : when, method: 'OTHER', reference: 'IMPORTED',
+        notes: 'Derived from the Excel register (month total minus the balance carried into the next month).', createdAt: when > today ? today : when,
       });
     }
   }

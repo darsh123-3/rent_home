@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { statusAfterPayment } from '../billing/bill-calculator';
 import { BillsService, monthLabel } from '../billing/bills.service';
 import { AuditService } from '../common/audit.service';
-import { parseDate, todayUtc } from '../common/dates';
+import { parseDate, todayLocal } from '../common/dates';
 import { OUTSTANDING_BILL_WHERE } from '../common/outstanding';
 import { paginate, skipTake } from '../common/pagination';
 import { PrismaService } from '../common/prisma.service';
@@ -31,8 +31,8 @@ export class PaymentsService {
     if (!bill) throw new NotFoundException('Bill not found');
 
     const paymentDate = parseDate(dto.paymentDate, 'Payment date');
-    const limit = new Date(todayUtc().getTime() + 86_400_000); // one day of slack for time zones ahead of UTC
-    if (paymentDate > limit) throw new BadRequestException('Payment date cannot be in the future');
+    // Compared with the India date, with no slack: a payment received today is accepted from 00:00 IST.
+    if (paymentDate > todayLocal()) throw new BadRequestException('Payment date cannot be in the future');
     const amount = Math.round(dto.amount * 100) / 100;
     if (!(amount > 0)) throw new BadRequestException('Payment amount must be more than zero');
 

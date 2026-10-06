@@ -1,12 +1,28 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Tenant } from '@prisma/client';
 import { AuditService } from '../common/audit.service';
-import { isoDate, monthStart, parseDate } from '../common/dates';
+import { isoDate, monthStart, parseDate, todayLocal } from '../common/dates';
+import { depositSummaries } from '../common/deposits';
 import { outstandingByTenant } from '../common/outstanding';
 import { PrismaService } from '../common/prisma.service';
-import { AssignmentTermsDto, ChangeElectricityDto, ChangeRentDto, CreateAssignmentDto, MoveOutDto } from './assignments.dto';
+import { AgreedDepositDto, AssignmentTermsDto, ChangeElectricityDto, ChangeRentDto, CreateAssignmentDto, DepositReceiptDto, MoveOutDto } from './assignments.dto';
 
 type Tx = Prisma.TransactionClient;
+
+/** Agreement dates are optional; when both are given the end cannot be before the start. */
+export function parseAgreementDates(start?: string, end?: string) {
+  const s = start ? parseDate(start, 'Agreement start date') : null;
+  const e = end ? parseDate(end, 'Agreement end date') : null;
+  if (s && e && e < s) throw new BadRequestException('Agreement end date cannot be before the agreement start date');
+  return { start: s, end: e };
+}
+
+/** A deposit's received date: defaults to today and can never be in the future (India time). */
+function parseReceivedOn(value?: string) {
+  const d = value ? parseDate(value, 'Received date') : todayLocal();
+  if (d > todayLocal()) throw new BadRequestException('Received date cannot be in the future');
+  return d;
+}
 
 @Injectable()
 export class AssignmentsService {
@@ -30,6 +46,8 @@ export class AssignmentsService {
     if (claimed.count === 0) throw new ConflictException('Room is already occupied');
 
     const startDate = parseDate(terms.startDate, 'Start date');
+    const agreement = parseAgreementDates(terms.agreementStartDate, terms.agreementEndDate);
+    const deposit = terms.depositReceived ? { amount: terms.depositReceived, receivedOn: parseReceivedOn(terms.depositReceivedOn), method: terms.depositMethod ?? 'CASH' } : null;
     const mode = terms.electricityMode ?? room.electricityMode;
     const ratePerUnit = mode === 'METER' ? terms.ratePerUnit ?? room.ratePerUnit ?? room.property.defaultRatePerUnit : null;
     const fixedElectricity = mode === 'FIXED' ? terms.fixedElectricity ?? room.fixedElectricity : null;
@@ -49,9 +67,12 @@ export class AssignmentsService {
         openingBalance: terms.openingBalance ?? 0,
         notes: terms.notes,
         status: 'ACTIVE',
+        agreementStartDate: agreement.start,
+        agreementEndDate: agreement.end,
       },
     });
     await tx.rentHistory.create({ data: { assignmentId: assignment.id, amount: terms.agreedRent, effectiveFrom: monthStart(startDate) } });
+    if (deposit) await tx.securityDepositReceipt.create({ data: { assignmentId: assignment.id, ...deposit, note: 'Received at move-in' } });
     await tx.tenant.update({ where: { id: tenant.id }, data: { status: 'ACTIVE' } });
     return assignment;
   }
@@ -62,6 +83,7 @@ export class AssignmentsService {
     try {
       const assignment = await this.prisma.$transaction((tx) => this.assignInTx(tx, tenant, dto));
       await this.audit.log(userId, 'assignment.create', 'room_assignment', assignment.id);
+      if (dto.depositReceived) await this.audit.log(userId, 'deposit.create', 'room_assignment', assignment.id, { amount: dto.depositReceived, atMoveIn: true });
       return assignment;
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new ConflictException('Room is already occupied');
@@ -152,6 +174,49 @@ export class AssignmentsService {
   async rentHistory(userId: string, id: string) {
     await this.ownedAssignment(userId, id);
     return this.prisma.rentHistory.findMany({ where: { assignmentId: id }, orderBy: { effectiveFrom: 'desc' } });
+  }
+
+  /** Sets or clears (null) the agreement dates of a tenant's active stay. */
+  async updateAgreementInTx(tx: Tx, tenantId: string, dates: { agreementStartDate?: string | null; agreementEndDate?: string | null }) {
+    const a = await tx.roomAssignment.findFirst({ where: { tenantId, status: 'ACTIVE' } });
+    if (!a) throw new ConflictException('Agreement dates can only be set while the tenant has a room');
+    const start = dates.agreementStartDate === undefined ? (a.agreementStartDate ? isoDate(a.agreementStartDate) : undefined) : dates.agreementStartDate ?? undefined;
+    const end = dates.agreementEndDate === undefined ? (a.agreementEndDate ? isoDate(a.agreementEndDate) : undefined) : dates.agreementEndDate ?? undefined;
+    const parsed = parseAgreementDates(start, end);
+    await tx.roomAssignment.update({ where: { id: a.id }, data: { agreementStartDate: parsed.start, agreementEndDate: parsed.end } });
+    return a.id;
+  }
+
+  // ---- security deposit received (instalments with dates) ----
+
+  async deposits(userId: string, id: string) {
+    await this.ownedAssignment(userId, id);
+    return (await depositSummaries(this.prisma, [id])).get(id)!;
+  }
+
+  /** Sets or corrects the agreed deposit of a stay. Receipts are untouched; pending is worked out again. */
+  async setAgreedDeposit(userId: string, id: string, dto: AgreedDepositDto) {
+    const a = await this.ownedAssignment(userId, id);
+    await this.prisma.roomAssignment.update({ where: { id }, data: { securityDeposit: dto.amount } });
+    await this.audit.log(userId, 'deposit.agreed_change', 'room_assignment', id, { from: a.securityDeposit.toNumber(), to: dto.amount });
+    return this.deposits(userId, id);
+  }
+
+  async addDeposit(userId: string, id: string, dto: DepositReceiptDto) {
+    await this.ownedAssignment(userId, id);
+    const receipt = await this.prisma.securityDepositReceipt.create({
+      data: { assignmentId: id, amount: dto.amount, receivedOn: parseReceivedOn(dto.receivedOn), method: dto.method, note: dto.note?.trim() || null },
+    });
+    await this.audit.log(userId, 'deposit.create', 'security_deposit_receipt', receipt.id, { assignmentId: id, amount: dto.amount, receivedOn: dto.receivedOn });
+    return this.deposits(userId, id);
+  }
+
+  async removeDeposit(userId: string, id: string, receiptId: string) {
+    await this.ownedAssignment(userId, id);
+    const res = await this.prisma.securityDepositReceipt.deleteMany({ where: { id: receiptId, assignmentId: id } });
+    if (!res.count) throw new NotFoundException('Deposit entry not found');
+    await this.audit.log(userId, 'deposit.delete', 'security_deposit_receipt', receiptId, { assignmentId: id });
+    return this.deposits(userId, id);
   }
 
   async listForTenant(userId: string, tenantId: string) {

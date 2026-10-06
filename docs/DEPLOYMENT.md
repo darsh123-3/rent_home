@@ -46,5 +46,6 @@ Almost all of the waiting time is network distance between the API and the datab
 ## Notes
 - Render's `free` plan sleeps when idle; use `starter` for an always-on API.
 - Whenever the database schema changes, the Render deploy runs the new migrations automatically on start.
+- Dates ("today", bill "Issued on", payment and deposit dates) follow `APP_TIMEZONE`, which defaults to `Asia/Kolkata`. Nothing to set unless the property is in another time zone.
 - Do not commit `.env` files or the Excel register. Secrets live only in Render, Vercel and your own computer.
 - Changing the API address later means: update `VITE_API_URL` in Vercel, `connect-src` in `vercel.json`, and redeploy the site.

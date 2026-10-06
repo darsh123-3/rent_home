@@ -39,6 +39,9 @@ export class UpdateTenantDto {
   @IsOptional() @Trim() @IsString() @MaxLength(120) occupation?: string;
   @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Joining date must be in YYYY-MM-DD format' }) joiningDate?: string;
   @IsOptional() @Trim() @IsString() @MaxLength(1000) notes?: string;
+  /** Agreement dates of the active stay. An empty string clears the date. */
+  @IsOptional() @Matches(/^$|^\d{4}-\d{2}-\d{2}$/, { message: 'Agreement start date must be in YYYY-MM-DD format' }) agreementStartDate?: string;
+  @IsOptional() @Matches(/^$|^\d{4}-\d{2}-\d{2}$/, { message: 'Agreement end date must be in YYYY-MM-DD format' }) agreementEndDate?: string;
 }
 
 export class ListTenantsQuery extends PaginationQuery {

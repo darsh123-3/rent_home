@@ -1,7 +1,9 @@
 import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { BillItemType, BillStatus, ChargeType, Prisma } from '@prisma/client';
+import { agreementInfo } from '../common/agreement';
 import { AuditService } from '../common/audit.service';
-import { monthStart, parseDate, todayUtc } from '../common/dates';
+import { isoDate, localDateOf, monthBounds, monthStart, parseDate, todayLocal } from '../common/dates';
+import { depositSummaries } from '../common/deposits';
 import { OUTSTANDING_BILL_WHERE } from '../common/outstanding';
 import { paginate, skipTake } from '../common/pagination';
 import { PrismaService } from '../common/prisma.service';
@@ -12,9 +14,15 @@ import { renderBillStatementPdf } from './bill-statement-pdf';
 import { calculateBill, calculateElectricity, fromPaise, rentForPeriod, toPaise } from './bill-calculator';
 import { CreateBillDto, ListBillsQuery, PreviewBillDto, RecurringChargeDto } from './bills.dto';
 
+/** Bill line names. CLEANING is shown as Housekeeping and INTERNET as WiFi; the stored categories keep their meaning. */
 export const CHARGE_LABEL: Record<ChargeType, string> = {
-  MAINTENANCE: 'Maintenance', WATER: 'Water', CLEANING: 'Cleaning', INTERNET: 'Internet', PARKING: 'Parking', REPAIR: 'Repair', LATE_FEE: 'Late fee', OTHER: 'Other',
+  WATER: 'Water bill', CLEANING: 'Housekeeping', MNGL_GAS: 'MNGL fuel bill', INTERNET: 'WiFi connection',
+  MAINTENANCE: 'Maintenance', PARKING: 'Parking', REPAIR: 'Repair', LATE_FEE: 'Late fee', OTHER: 'Other',
 };
+
+/** Monthly charges with their own line on every bill, in this order after electricity (at most one line each). */
+export const MONTHLY_CHARGES = ['WATER', 'CLEANING', 'MNGL_GAS', 'INTERNET'] as const satisfies readonly ChargeType[];
+export const isMonthlyCharge = (t: ChargeType): t is (typeof MONTHLY_CHARGES)[number] => (MONTHLY_CHARGES as readonly ChargeType[]).includes(t);
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 export const monthLabel = (d: Date) => `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
@@ -22,8 +30,30 @@ const addMonths = (d: Date, n: number) => new Date(Date.UTC(d.getUTCFullYear(), 
 const money = (d: Prisma.Decimal | number) => (typeof d === 'number' ? d : d.toNumber());
 
 /** OVERDUE is derived from the due date, so no background job is needed. */
-export function effectiveStatus(bill: { status: BillStatus; dueDate: Date }, today = todayUtc()): BillStatus {
+export function effectiveStatus(bill: { status: BillStatus; dueDate: Date }, today = todayLocal()): BillStatus {
   return (bill.status === 'GENERATED' || bill.status === 'PARTIALLY_PAID') && bill.dueDate < today ? 'OVERDUE' : bill.status;
+}
+
+type DraftCharge = { type: ChargeType; name: string; amount: number; note?: string };
+
+/**
+ * Bill lines for the charges: Water, Housekeeping, MNGL fuel and WiFi first in that fixed order (at most one line each),
+ * then any other charges as entered. A 0 amount leaves the line off the bill. Totals are unaffected by the order.
+ */
+export function orderCharges(input: { type: ChargeType; name?: string; amount: number; note?: string }[]): DraftCharge[] {
+  const seen = new Set<ChargeType>();
+  const lines = input.map((c) => {
+    if (c.type === 'LATE_FEE') throw new BadRequestException('Enter late fees in the late fee field');
+    if (isMonthlyCharge(c.type)) {
+      if (seen.has(c.type)) throw new BadRequestException(`Only one ${CHARGE_LABEL[c.type]} line is allowed per bill`);
+      seen.add(c.type);
+    }
+    const note = c.note?.trim();
+    return { type: c.type, name: c.name?.trim() || CHARGE_LABEL[c.type], amount: c.amount, ...(note ? { note } : {}) };
+  });
+  const rank = (t: ChargeType) => (isMonthlyCharge(t) ? MONTHLY_CHARGES.indexOf(t) : MONTHLY_CHARGES.length);
+  // Array.prototype.sort is stable, so other charges keep the order they were entered in.
+  return lines.filter((c) => c.amount > 0).sort((a, b) => rank(a.type) - rank(b.type));
 }
 
 interface Draft {
@@ -32,7 +62,7 @@ interface Draft {
   dueDate: Date;
   rent: number;
   electricity: ReturnType<typeof calculateElectricity>;
-  charges: { type: ChargeType; name: string; amount: number }[];
+  charges: DraftCharge[];
   totals: ReturnType<typeof calculateBill>;
   carry: { id: string; billNumber: string; balance: number }[];
   /** Pre-system balance, only on an assignment's first live bill. */
@@ -66,7 +96,7 @@ export class BillsService {
   private async suggestPeriod(a: { id: string; startDate: Date; endDate: Date | null }) {
     const last = await this.prisma.bill.findFirst({ where: { assignmentId: a.id, status: { not: 'CANCELLED' } }, orderBy: { billingPeriod: 'desc' } });
     // Month M is billed in month M+1, once M's meter reading is in: the first suggestion is the last completed month.
-    let period = last ? addMonths(last.billingPeriod, 1) : addMonths(monthStart(todayUtc()), -1);
+    let period = last ? addMonths(last.billingPeriod, 1) : addMonths(monthStart(todayLocal()), -1);
     if (period < monthStart(a.startDate)) period = monthStart(a.startDate);
     if (a.endDate && period > monthStart(a.endDate)) period = monthStart(a.endDate);
     return period;
@@ -80,7 +110,7 @@ export class BillsService {
 
     if (period < monthStart(assignment.startDate)) throw new BadRequestException('This is before the tenant moved in');
     if (assignment.endDate && period > monthStart(assignment.endDate)) throw new BadRequestException('This is after the tenant moved out');
-    if (period > addMonths(monthStart(todayUtc()), 1)) throw new BadRequestException('Bills can be generated up to one month ahead');
+    if (period > addMonths(monthStart(todayLocal()), 1)) throw new BadRequestException('Bills can be generated up to one month ahead');
 
     const live = { assignmentId: assignment.id, status: { not: 'CANCELLED' as BillStatus } };
     const existing = await db.bill.findFirst({ where: { ...live, billingPeriod: period } });
@@ -111,10 +141,7 @@ export class BillsService {
       : calculateElectricity(electricityInput);
     if (el.previousReading != null && el.previousReading !== storedPrevious && assignment.electricityMode === 'METER') electricity.isOverride = true;
 
-    const charges = (dto.charges ?? []).map((c) => {
-      if (c.type === 'LATE_FEE') throw new BadRequestException('Enter late fees in the late fee field');
-      return { type: c.type, name: c.name?.trim() || CHARGE_LABEL[c.type], amount: c.amount };
-    });
+    const charges = orderCharges(dto.charges ?? []);
 
     // Unpaid balance of earlier bills rolls into this one.
     const open = await db.bill.findMany({ where: { tenantId: assignment.tenantId, ...OUTSTANDING_BILL_WHERE, billingPeriod: { lt: period } }, orderBy: { billingPeriod: 'asc' } });
@@ -178,7 +205,7 @@ export class BillsService {
             meta: { mode: el.mode, previousReading: el.previousReading, currentReading: el.currentReading, units: el.units, ratePerUnit: el.ratePerUnit, calculatedAmount: el.calculatedAmount, isOverride: el.isOverride },
           });
         }
-        for (const c of draft.charges) items.push({ type: 'CHARGE', description: c.name, amount: c.amount, meta: { chargeType: c.type } });
+        for (const c of draft.charges) items.push({ type: 'CHARGE', description: c.name, amount: c.amount, meta: { chargeType: c.type, ...(c.note ? { note: c.note } : {}) } });
         if (totals.lateFee > 0) items.push({ type: 'LATE_FEE', description: 'Late fee', amount: totals.lateFee });
         if (totals.discount > 0) items.push({ type: 'DISCOUNT', description: 'Discount', amount: -totals.discount });
         if (totals.previousBalance > 0) {
@@ -203,6 +230,8 @@ export class BillsService {
             previousBalance: totals.previousBalance,
             totalDue: totals.totalDue,
             notes: draft.notes,
+            // The issue moment comes from the app's clock; its India calendar day is the bill's "Issued on" date.
+            createdAt: new Date(),
             items: { create: items.map((i, idx) => ({ ...i, sortOrder: idx })) },
           },
         });
@@ -240,27 +269,55 @@ export class BillsService {
         items: { orderBy: { sortOrder: 'asc' } },
         tenant: { select: { id: true, fullName: true, phone: true } },
         room: { select: { id: true, roomNumber: true } },
-        property: { select: { id: true, name: true, address: true, city: true, state: true, pincode: true } },
+        property: { select: { id: true, name: true, address: true, city: true, state: true, pincode: true, contactPhone: true } },
         payments: { orderBy: [{ paymentDate: 'desc' }, { createdAt: 'desc' }] },
+        assignment: { select: { status: true, agreementStartDate: true, agreementEndDate: true } },
       },
     }),
     this.prisma.bill.findMany({ where: { carriedForwardToId: id, property: { ownerId: userId } }, select: { id: true, billNumber: true, billingPeriod: true } }),
     ]);
     if (!bill) throw new NotFoundException('Bill not found');
-    const carriedInto = bill.carriedForwardToId ? await this.prisma.bill.findUnique({ where: { id: bill.carriedForwardToId }, select: { id: true, billNumber: true } }) : null;
-    return this.present({ ...bill, carriedInto, absorbed });
+    const [carriedInto, deposits] = await Promise.all([
+      bill.carriedForwardToId ? this.prisma.bill.findUnique({ where: { id: bill.carriedForwardToId }, select: { id: true, billNumber: true } }) : null,
+      depositSummaries(this.prisma, [bill.assignmentId]),
+    ]);
+    const { assignment, ...rest } = bill;
+    const deposit = deposits.get(bill.assignmentId);
+    const presented = this.present({ ...rest, carriedInto, absorbed });
+    // Payments are listed newest first by received date, so the first one is the latest money received.
+    const latest = bill.payments[0];
+    const settled = presented.balance <= 0 && bill.status !== 'CANCELLED' && !!latest;
+    return {
+      ...presented,
+      paidInFullOn: settled ? isoDate(latest.paymentDate) : null,
+      lastPayment: latest && !settled ? { amount: money(latest.amount), paymentDate: isoDate(latest.paymentDate) } : null,
+      // Informational only: the deposit is never added to the bill.
+      securityDeposit: deposit && deposit.totalReceived > 0 ? { totalReceived: deposit.totalReceived, lastReceivedOn: deposit.lastReceivedOn } : null,
+      agreement: assignment.status === 'ACTIVE' ? agreementInfo(assignment) : null,
+    };
   }
 
   /** Adds the derived fields every client needs: balance and effective (overdue-aware) status. */
-  present<T extends { status: BillStatus; dueDate: Date; totalDue: Prisma.Decimal; paidAmount: Prisma.Decimal }>(bill: T) {
+  present<T extends { status: BillStatus; dueDate: Date; billingPeriod: Date; createdAt?: Date; totalDue: Prisma.Decimal; paidAmount: Prisma.Decimal }>(bill: T) {
     const balance = fromPaise(toPaise(money(bill.totalDue)) - toPaise(money(bill.paidAmount)));
-    return { ...bill, storedStatus: bill.status, status: effectiveStatus(bill), balance };
+    const period = monthBounds(bill.billingPeriod);
+    return {
+      ...bill,
+      storedStatus: bill.status,
+      status: effectiveStatus(bill),
+      balance,
+      // "Bill period" as a date range: first to last day of the billing month.
+      billPeriodStart: isoDate(period.start),
+      billPeriodEnd: isoDate(period.end),
+      // "Issued on": the India calendar day the bill was generated (createdAt is a UTC instant).
+      ...(bill.createdAt ? { issuedOn: isoDate(localDateOf(bill.createdAt)) } : {}),
+    };
   }
 
   async list(userId: string, q: ListBillsQuery) {
     const propertyIds = q.propertyId ? [q.propertyId] : await this.properties.ownedIds(userId);
     const search = q.search?.trim();
-    const today = todayUtc();
+    const today = todayLocal();
     const where: Prisma.BillWhereInput = {
       propertyId: { in: propertyIds },
       ...(q.tenantId ? { tenantId: q.tenantId } : {}),

@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
-import type { Paginated, TenantDetail, TenantElectricity, TenantListItem, TenantStatus } from '@/types/api';
+import type { Paginated, PaymentMethod, SecurityDepositSummary, TenantDetail, TenantElectricity, TenantListItem, TenantStatus } from '@/types/api';
 
 export interface TenantFilters { propertyId?: string; status?: TenantStatus; search?: string; dues?: 'true' }
 
@@ -67,3 +67,19 @@ export function useChangeElectricity(assignmentId: string) {
 
 export const useTenantElectricity = (tenantId?: string) =>
   useQuery({ queryKey: ['tenants', 'electricity', tenantId], enabled: !!tenantId, queryFn: () => api.get<TenantElectricity>(`/tenants/${tenantId}/electricity`) });
+
+export interface DepositInput { amount: number; receivedOn: string; method: PaymentMethod; note?: string }
+/** Security deposit received for a stay, in instalments. Never part of a bill. */
+export function useAddDeposit(assignmentId: string) {
+  const invalidate = useInvalidateCore();
+  return useMutation({ mutationFn: (body: DepositInput) => api.post<SecurityDepositSummary>(`/room-assignments/${assignmentId}/deposits`, body), onSuccess: invalidate });
+}
+export function useDeleteDeposit(assignmentId: string) {
+  const invalidate = useInvalidateCore();
+  return useMutation({ mutationFn: (receiptId: string) => api.delete<SecurityDepositSummary>(`/room-assignments/${assignmentId}/deposits/${receiptId}`), onSuccess: invalidate });
+}
+/** Sets or corrects the agreed deposit of a stay (what the tenant should pay). */
+export function useSetAgreedDeposit(assignmentId: string) {
+  const invalidate = useInvalidateCore();
+  return useMutation({ mutationFn: (amount: number) => api.post<SecurityDepositSummary>(`/room-assignments/${assignmentId}/agreed-deposit`, { amount }), onSuccess: invalidate });
+}

@@ -2,16 +2,19 @@ import { Banknote, CircleCheck, Link2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { friendlyError } from '@/api/client';
-import { Button, Card, ConfirmDialog, ErrorState, Icon, LinkButton, Notice, SectionHeader, SkeletonList } from '@/components/ui';
+import { Button, Card, ConfirmDialog, DetailRow, ErrorState, Icon, LinkButton, Notice, SectionHeader, SkeletonList } from '@/components/ui';
 import { Page } from '@/components/layout/Page';
 import { useBill, useCancelBill, useDeleteBill } from '@/features/bills/api';
 import { BillActions } from '@/features/bills/BillActions';
 import { BillStatusBadge } from '@/features/bills/BillCard';
+import { AgreementBadge } from '@/features/tenants/AgreementBadge';
 import { METHOD_LABEL } from '@/features/payments/constants';
 import { formatDate, formatINR, formatMonth } from '@/utils/format';
 import type { BillItemRow } from '@rental/shared';
 
-const itemLabel = (i: BillItemRow) => (i.type === 'ELECTRICITY' && i.meta?.currentReading != null ? `Electricity (${i.meta.units} units × ${formatINR(i.meta.ratePerUnit)})` : i.description);
+const itemLabel = (i: BillItemRow) =>
+  i.type === 'ELECTRICITY' && i.meta?.currentReading != null ? `Electricity (${i.meta.units} units × ${formatINR(i.meta.ratePerUnit)})`
+    : i.type === 'CHARGE' && typeof i.meta?.note === 'string' && i.meta.note ? `${i.description} (${i.meta.note})` : i.description;
 
 function Banner({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -52,7 +55,12 @@ export function BillDetailPage() {
           <div><Link to={`/tenants/${bill.tenant.id}`} className="text-heading hover:underline">{bill.tenant.fullName}</Link><div className="text-small text-ink-soft">Room {bill.room.roomNumber} · {bill.property.name}</div></div>
           <BillStatusBadge status={bill.status} />
         </div>
-        <div className="text-small text-ink-muted">Due {formatDate(bill.dueDate)}</div>
+        {!cancelled ? <AgreementBadge agreement={bill.agreement} compact /> : null}
+        <div className="border-t border-line pt-1">
+          <DetailRow label="Bill period" value={`${formatDate(bill.billPeriodStart)} – ${formatDate(bill.billPeriodEnd)}`} />
+          <DetailRow label="Issued on" value={formatDate(bill.issuedOn)} />
+          <DetailRow label="Due date" value={formatDate(bill.dueDate)} tone={bill.status === 'OVERDUE' ? 'danger' : undefined} last />
+        </div>
       </Card>
 
       <SectionHeader title="Charges" />
@@ -67,7 +75,10 @@ export function BillDetailPage() {
           <div className="flex items-center justify-between"><span className="text-heading">Total</span><span className="text-title">{formatINR(bill.totalDue)}</span></div>
           <div className="flex items-center justify-between"><span className="text-ink-soft">Paid</span><span className="font-medium text-success">{formatINR(bill.paidAmount)}</span></div>
           <div className="flex items-center justify-between"><span className="text-ink-soft">Balance</span><span className={`text-heading ${bill.balance > 0 && !bill.carriedInto ? 'text-danger' : ''}`}>{formatINR(bill.balance)}</span></div>
+          {!cancelled && bill.paidInFullOn ? <div className="flex items-center justify-end gap-1.5 text-small font-semibold text-success"><Icon icon={CircleCheck} size={16} tone="success" />Paid in full on {formatDate(bill.paidInFullOn)}</div> : null}
+          {!cancelled && bill.lastPayment ? <div className="text-right text-small text-ink-soft">Last payment {formatINR(bill.lastPayment.amount)} on {formatDate(bill.lastPayment.paymentDate)}</div> : null}
         </div>
+        {bill.securityDeposit ? <p className="mt-3 border-t border-line pt-2 text-small text-ink-soft">Security deposit received: {formatINR(bill.securityDeposit.totalReceived)}{bill.securityDeposit.lastReceivedOn ? ` (last received ${formatDate(bill.securityDeposit.lastReceivedOn)})` : ''}. Not part of this bill.</p> : null}
       </Card>
 
       {!cancelled ? (
@@ -85,7 +96,7 @@ export function BillDetailPage() {
           <Card padded={false} className="overflow-hidden">
             {bill.payments.map((p, i) => (
               <div key={p.id} className={`flex items-center justify-between px-4 py-3 ${i < bill.payments.length - 1 ? 'border-b border-line' : ''}`}>
-                <div className="pr-3"><div className="font-medium">{METHOD_LABEL[p.method]}</div><div className="text-small text-ink-soft">{formatDate(p.paymentDate)}{p.reference ? ` · ${p.reference}` : ''}</div></div>
+                <div className="pr-3"><div className="font-medium">{METHOD_LABEL[p.method]}</div><div className="text-small text-ink-soft">Received {formatDate(p.paymentDate)}{p.reference ? ` · ${p.reference}` : ''}</div></div>
                 <span className="text-heading text-success">{formatINR(p.amount)}</span>
               </div>
             ))}
