@@ -1,7 +1,7 @@
 import PDFDocument from 'pdfkit';
 import * as path from 'path';
-import { formatDate } from '../common/format';
-import type { PdfBill } from './bill-pdf';
+import { formatDate, formatDateLocal } from '../common/format';
+import { billPeriodLabel, depositLine, paymentDateLine, type PdfBill } from './bill-pdf';
 
 const FONT_DIR = path.resolve(__dirname, '../../assets/fonts');
 const COLORS = { head: '#D9D9D9', label: '#FFFF99', total: '#C6EFCE', white: '#FFFFFF', line: '#000000', note: '#64748B' };
@@ -60,7 +60,16 @@ export function renderBillStatementPdf(bill: PdfBill): Promise<Buffer> {
     const width = 340;
     const tableH = rows.reduce((h, r) => h + (r.kind === 'total' ? totalRowH : rowH), 0);
     const pageW = width + margin * 2;
-    const pageH = tableH + margin * 2 + 44;
+    // Bill period · Issued · Due, then when it was paid and the deposit held (informational), then the property line.
+    const notes = [
+      `Bill period ${billPeriodLabel(bill.billingPeriod)}`,
+      `Issued ${formatDateLocal(bill.createdAt)}  ·  Due ${formatDate(bill.dueDate)}${bill.overdue ? ' (overdue)' : ''}`,
+      paymentDateLine(bill),
+      depositLine(bill),
+      `${bill.property.name}  ·  ${bill.billNumber}${bill.property.contactPhone ? `  ·  ${bill.property.contactPhone}` : ''}`,
+      bill.property.billFooterNote ?? '',
+    ].filter(Boolean);
+    const pageH = tableH + margin * 2 + 4 + notes.length * 13;
 
     const doc = new PDFDocument({
       size: [pageW, pageH],
@@ -96,8 +105,7 @@ export function renderBillStatementPdf(bill: PdfBill): Promise<Buffer> {
     }
 
     doc.font('R').fontSize(8.5).fillColor(COLORS.note);
-    doc.text(`${bill.property.name}  ·  ${bill.billNumber}  ·  Due ${formatDate(bill.dueDate)}${bill.overdue ? ' (overdue)' : ''}`, margin, y + 12, { width, align: 'center', lineBreak: false });
-    if (bill.property.billFooterNote) doc.text(bill.property.billFooterNote, margin, y + 25, { width, align: 'center', lineBreak: false, ellipsis: true });
+    notes.forEach((n, i) => doc.text(n, margin, y + 12 + i * 13, { width, align: 'center', lineBreak: false, ellipsis: true }));
     doc.end();
   });
 }

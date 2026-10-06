@@ -15,9 +15,12 @@ export class ElectricityDto {
 }
 
 export class BillChargeDto {
-  @IsEnum(ChargeType) type: ChargeType;
+  @IsEnum(ChargeType, { message: 'Unknown charge type' }) type: ChargeType;
   @IsOptional() @IsString() @MaxLength(60) name?: string;
-  @Type(() => Number) @IsNumber(money) @IsPositive({ message: 'Charge amount must be more than zero' }) amount: number;
+  /** 0 leaves the line off the bill (a monthly charge not due this month). */
+  @Type(() => Number) @IsNumber(money, { message: 'Charge amount must have at most 2 decimals' }) @Min(0, { message: 'Charge amount cannot be negative' }) amount: number;
+  /** Small print under the line, e.g. MNGL units or reading. */
+  @IsOptional() @IsString() @MaxLength(60) note?: string;
 }
 
 /** Amounts here are inputs only; the server recalculates and stores its own totals. */

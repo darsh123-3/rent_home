@@ -45,7 +45,10 @@ export class PropertiesService {
 
   async update(userId: string, id: string, dto: UpdatePropertyDto) {
     await this.assertOwned(userId, id);
-    const property = await this.prisma.property.update({ where: { id }, data: { ...dto, ...(dto.upiId !== undefined ? { upiId: dto.upiId.trim() || null } : {}) } });
+    const property = await this.prisma.property.update({
+      where: { id },
+      data: { ...dto, ...(dto.upiId !== undefined ? { upiId: dto.upiId.trim() || null } : {}), ...(dto.contactPhone !== undefined ? { contactPhone: dto.contactPhone || null } : {}) },
+    });
     await this.audit.log(userId, 'property.update', 'property', id);
     return property;
   }

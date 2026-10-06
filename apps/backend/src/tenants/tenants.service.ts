@@ -2,7 +2,9 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { Prisma } from '@prisma/client';
 import { AssignmentsService } from '../assignments/assignments.service';
 import { AuditService } from '../common/audit.service';
-import { parseDate } from '../common/dates';
+import { agreementInfo } from '../common/agreement';
+import { parseDate, todayLocal } from '../common/dates';
+import { depositSummaries } from '../common/deposits';
 import { formatINR } from '../common/format';
 import { outstandingByProperties, outstandingByTenant } from '../common/outstanding';
 import { paginate, skipTake } from '../common/pagination';
@@ -64,6 +66,7 @@ export class TenantsService {
       }),
       outstandingByProperties(this.prisma, propertyIds),
     ]);
+    const today = todayLocal();
     const items = tenants.map(({ assignments, ...t }) => {
       const a = assignments[0];
       return {
@@ -72,6 +75,7 @@ export class TenantsService {
         assignmentId: a?.id ?? null,
         monthlyRent: a?.agreedRent ?? null,
         balance: balances.get(t.id) ?? 0,
+        agreement: a ? agreementInfo(a, today) : null,
       };
     });
     return paginate(items, total, q);
@@ -135,13 +139,17 @@ export class TenantsService {
     const { assignments, documents, ...rest } = tenant;
     const active = assignments.find((a) => a.status === 'ACTIVE') ?? null;
     const balance = balances.get(id) ?? 0;
+    const depositStay = active ?? assignments[0];
+    const deposit = depositStay ? (await depositSummaries(this.prisma, [depositStay.id])).get(depositStay.id) ?? null : null;
     return {
       ...rest,
       currentAssignment: active && {
         id: active.id, room: active.room, startDate: active.startDate, agreedRent: active.agreedRent, securityDeposit: active.securityDeposit,
         electricityMode: active.electricityMode, ratePerUnit: active.ratePerUnit, fixedElectricity: active.fixedElectricity,
         initialMeterReading: active.initialMeterReading, rents: active.rents,
+        ...agreementInfo(active),
       },
+      securityDeposit: deposit,
       // The latest assignment, used for the summary when the tenant has moved out
       lastAssignment: active ? null : assignments[0] && { id: assignments[0].id, room: assignments[0].room, startDate: assignments[0].startDate, endDate: assignments[0].endDate, agreedRent: assignments[0].agreedRent, securityDeposit: assignments[0].securityDeposit },
       roomHistory: assignments.map((a) => ({
@@ -173,6 +181,7 @@ export class TenantsService {
         return created;
       });
       await this.audit.log(userId, 'tenant.create', 'tenant', tenant.id);
+      if (assignment?.depositReceived) await this.audit.log(userId, 'deposit.create', 'tenant', tenant.id, { amount: assignment.depositReceived, atMoveIn: true });
       return this.get(userId, tenant.id);
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new ConflictException('Room is already occupied');
@@ -182,8 +191,18 @@ export class TenantsService {
 
   async update(userId: string, id: string, dto: UpdateTenantDto) {
     await this.assertOwned(userId, id);
-    const { joiningDate, ...rest } = dto;
-    await this.prisma.tenant.update({ where: { id }, data: { ...rest, ...(joiningDate ? { joiningDate: parseDate(joiningDate, 'Joining date') } : {}) } });
+    const { joiningDate, agreementStartDate, agreementEndDate, ...rest } = dto;
+    const agreementChanged = agreementStartDate !== undefined || agreementEndDate !== undefined;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.tenant.update({ where: { id }, data: { ...rest, ...(joiningDate ? { joiningDate: parseDate(joiningDate, 'Joining date') } : {}) } });
+      // '' clears a date; undefined leaves it as it is.
+      if (agreementChanged) {
+        await this.assignments.updateAgreementInTx(tx, id, {
+          ...(agreementStartDate !== undefined ? { agreementStartDate: agreementStartDate || null } : {}),
+          ...(agreementEndDate !== undefined ? { agreementEndDate: agreementEndDate || null } : {}),
+        });
+      }
+    });
     await this.audit.log(userId, 'tenant.update', 'tenant', id);
     return this.get(userId, id);
   }

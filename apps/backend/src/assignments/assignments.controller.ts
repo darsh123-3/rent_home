@@ -1,6 +1,6 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { AuthUser, CurrentUser, ResponseMessage } from '../common/decorators';
-import { ChangeElectricityDto, ChangeRentDto, CreateAssignmentDto, MoveOutDto } from './assignments.dto';
+import { ChangeElectricityDto, ChangeRentDto, CreateAssignmentDto, DepositReceiptDto, MoveOutDto } from './assignments.dto';
 import { AssignmentsService } from './assignments.service';
 
 @Controller('room-assignments')
@@ -37,5 +37,23 @@ export class AssignmentsController {
   @Get(':id/rent-history')
   rentHistory(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.rentHistory(u.userId, id);
+  }
+
+  /** Security deposit received for the stay: receipts plus agreed / total received / pending. */
+  @Get(':id/deposits')
+  deposits(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.deposits(u.userId, id);
+  }
+
+  @Post(':id/deposits')
+  @ResponseMessage('Deposit recorded')
+  addDeposit(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: DepositReceiptDto) {
+    return this.service.addDeposit(u.userId, id, dto);
+  }
+
+  @Delete(':id/deposits/:receiptId')
+  @ResponseMessage('Deposit entry removed')
+  removeDeposit(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Param('receiptId', ParseUUIDPipe) receiptId: string) {
+    return this.service.removeDeposit(u.userId, id, receiptId);
   }
 }

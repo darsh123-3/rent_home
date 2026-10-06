@@ -2,12 +2,15 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { fromPaise, toPaise } from '../billing/bill-calculator';
 import { monthLabel } from '../billing/bills.service';
+import { chargesByCategory } from '../common/charges';
 import { todayLocal } from '../common/dates';
 import { OUTSTANDING_BILL_WHERE } from '../common/outstanding';
 import { PrismaService } from '../common/prisma.service';
 import { PropertiesService } from '../properties/properties.service';
 
 const MS_DAY = 86_400_000;
+const CATEGORY_ORDER = ['WATER', 'CLEANING', 'MNGL_GAS', 'INTERNET', 'OTHER'] as const;
+const CATEGORY_LABEL = { WATER: 'Water bill', CLEANING: 'Housekeeping', MNGL_GAS: 'MNGL fuel bill', INTERNET: 'WiFi connection', OTHER: 'Other charges' } as const;
 const num = (d: Prisma.Decimal | number | null | undefined) => (d == null ? 0 : typeof d === 'number' ? d : d.toNumber());
 const ymOf = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 
@@ -48,7 +51,7 @@ export class ReportsService {
     const month = requestedMonth ?? (await this.defaultMonth(propertyIds));
     const { start, end } = bounds(month);
 
-    const [billed, collected, byMethod, outstanding, trend] = await Promise.all([
+    const [billed, collected, byMethod, outstanding, trend, chargeItems] = await Promise.all([
       this.prisma.bill.findMany({
         where: { propertyId: { in: propertyIds }, billingPeriod: start, status: { notIn: ['CANCELLED', 'DRAFT'] } },
         select: { totalDue: true, previousBalance: true, rentAmount: true, electricityAmount: true, otherChargesAmount: true },
@@ -57,7 +60,13 @@ export class ReportsService {
       this.prisma.payment.groupBy({ by: ['method'], where: { bill: { propertyId: { in: propertyIds } }, paymentDate: { gte: start, lte: end } }, _sum: { amount: true }, _count: true }),
       this.totalOutstanding(propertyIds),
       this.trend(propertyIds, month),
+      this.prisma.billItem.findMany({
+        where: { type: 'CHARGE', bill: { propertyId: { in: propertyIds }, billingPeriod: start, status: { notIn: ['CANCELLED', 'DRAFT'] } } },
+        select: { type: true, amount: true, meta: true },
+      }),
     ]);
+    const cat = chargesByCategory(chargeItems);
+    const counts = chargesByCategory(chargeItems.map((i) => ({ ...i, amount: 1 })));
     // "Expected" is this month's own charges, not the arrears that were rolled into them.
     const expected = fromPaise(billed.reduce((s, b) => s + toPaise(num(b.totalDue)) - toPaise(num(b.previousBalance)), 0));
     const collectedAmount = num(collected._sum.amount);
@@ -72,6 +81,8 @@ export class ReportsService {
       paymentCount: collected._count,
       pending: outstanding,
       collectionRate: expected > 0 ? Math.min(1, collectedAmount / expected) : 0,
+      // Water, Housekeeping, MNGL gas, WiFi and every other charge billed for the month.
+      byCategory: CATEGORY_ORDER.map((c) => ({ category: c, label: CATEGORY_LABEL[c], amount: cat[c], count: counts[c] })),
       byMethod: byMethod.map((m) => ({ method: m.method, amount: num(m._sum.amount), count: m._count })).sort((a, b) => b.amount - a.amount),
       trend,
     };

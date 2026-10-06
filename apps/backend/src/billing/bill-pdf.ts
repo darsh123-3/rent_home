@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import * as path from 'path';
+import { monthBounds } from '../common/dates';
 import { formatDate, formatDateLocal, formatINR } from '../common/format';
 import { monthLabel } from './bills.service';
 
@@ -27,7 +28,34 @@ export interface PdfBill {
   payments: { paymentDate: Date; method: string; reference: string | null; amount: number }[];
   tenant: { fullName: string; phone: string };
   room: { roomNumber: string };
-  property: { name: string; address: string; city: string; state: string; pincode: string; billFooterNote?: string | null; upiId?: string | null };
+  property: { name: string; address: string; city: string; state: string; pincode: string; billFooterNote?: string | null; upiId?: string | null; contactPhone?: string | null };
+  /** Received date of the payment that settled the bill (YYYY-MM-DD). */
+  paidInFullOn?: string | null;
+  /** Latest payment while the bill is part paid. */
+  lastPayment?: { amount: number; paymentDate: string } | null;
+  /** Informational only, never part of the total. */
+  securityDeposit?: { totalReceived: number; lastReceivedOn: string | null } | null;
+}
+
+/** "01 Aug 2026 – 31 Aug 2026": the first to the last day of the billing month. */
+export const billPeriodLabel = (billingPeriod: Date) => {
+  const { start, end } = monthBounds(billingPeriod);
+  return `${formatDate(start)} – ${formatDate(end)}`;
+};
+
+/** "Paid in full on 12 Oct 2026" or "Last payment ₹3,000 on 12 Oct 2026"; empty when nothing was paid. */
+export function paymentDateLine(bill: Pick<PdfBill, 'paidInFullOn' | 'lastPayment' | 'status'>) {
+  if (bill.status === 'CANCELLED') return '';
+  if (bill.paidInFullOn) return `Paid in full on ${formatDate(bill.paidInFullOn)}`;
+  if (bill.lastPayment) return `Last payment ${formatINR(bill.lastPayment.amount)} on ${formatDate(bill.lastPayment.paymentDate)}`;
+  return '';
+}
+
+/** "Security deposit received: ₹15,000 (last received 20 Jan 2026)"; empty when nothing was received. */
+export function depositLine(bill: Pick<PdfBill, 'securityDeposit'>) {
+  const d = bill.securityDeposit;
+  if (!d || d.totalReceived <= 0) return '';
+  return `Security deposit received: ${formatINR(d.totalReceived)}${d.lastReceivedOn ? ` (last received ${formatDate(d.lastReceivedOn)})` : ''}`;
 }
 
 const STATUS: Record<string, { label: string; color: string }> = {
@@ -43,7 +71,9 @@ const METHOD: Record<string, string> = { CASH: 'Cash', UPI: 'UPI', BANK_TRANSFER
 const itemLabel = (i: PdfBill['items'][number]) =>
   i.type === 'ELECTRICITY' && i.meta?.currentReading != null
     ? `Electricity (${i.meta.previousReading} to ${i.meta.currentReading}: ${i.meta.units} units x ${formatINR(i.meta.ratePerUnit)})`
-    : i.description;
+    : i.type === 'CHARGE' && typeof i.meta?.note === 'string' && i.meta.note
+      ? `${i.description} (${i.meta.note})`
+      : i.description;
 
 /** Renders a clean A4 rent invoice/receipt and resolves with the PDF bytes. */
 export function renderBillPdf(bill: PdfBill): Promise<Buffer> {
@@ -69,7 +99,7 @@ export function renderBillPdf(bill: PdfBill): Promise<Buffer> {
 
     // ---- Header ----
     doc.font('B').fontSize(19).fillColor(C.primary).text(bill.property.name, left, 44, { width: width * 0.6 });
-    doc.font('R').fontSize(9).fillColor(C.soft).text(`${bill.property.address}\n${bill.property.city}, ${bill.property.state} - ${bill.property.pincode}`, left, doc.y + 2, { width: width * 0.6 });
+    doc.font('R').fontSize(9).fillColor(C.soft).text(`${bill.property.address}\n${bill.property.city}, ${bill.property.state} - ${bill.property.pincode}${bill.property.contactPhone ? `\nPhone: ${bill.property.contactPhone}` : ''}`, left, doc.y + 2, { width: width * 0.6 });
 
     doc.font('B').fontSize(22).fillColor(C.ink).text('INVOICE', left, 44, { width, align: 'right' });
     doc.font('R').fontSize(10).fillColor(C.soft).text(bill.billNumber, left, 72, { width, align: 'right' });
@@ -87,16 +117,16 @@ export function renderBillPdf(bill: PdfBill): Promise<Buffer> {
     doc.font('R').fontSize(10).fillColor(C.soft).text(`Room ${bill.room.roomNumber}`, left, doc.y + 2).text(`Phone: ${bill.tenant.phone}`, left, doc.y + 1);
     const blockBottom = doc.y;
 
-    const labelX = left + width * 0.55;
+    const labelX = left + width * 0.48;
     const rows: [string, string, string?][] = [
-      ['Billing period', monthLabel(bill.billingPeriod)],
+      ['Bill period', billPeriodLabel(bill.billingPeriod)],
       ['Invoice date', formatDateLocal(bill.createdAt)],
       ['Due date', bill.overdue ? `${formatDate(bill.dueDate)} (overdue)` : formatDate(bill.dueDate), bill.overdue ? C.danger : undefined],
     ];
     rows.forEach(([k, v, color], i) => {
       const ry = y + i * 20;
-      doc.font('R').fontSize(9).fillColor(C.soft).text(k, labelX, ry, { width: width * 0.22 });
-      doc.font('S').fontSize(10).fillColor(color ?? C.ink).text(v, labelX + width * 0.22, ry - 1, { width: width * 0.23, align: 'right' });
+      doc.font('R').fontSize(9).fillColor(C.soft).text(k, labelX, ry, { width: width * 0.16 });
+      doc.font('S').fontSize(10).fillColor(color ?? C.ink).text(v, labelX + width * 0.16, ry - 1, { width: width * 0.36, align: 'right' });
     });
     y = Math.max(blockBottom, y + 62) + 22;
 
@@ -138,7 +168,14 @@ export function renderBillPdf(bill: PdfBill): Promise<Buffer> {
     doc.roundedRect(tx - 10, y - 6, tw + 10, 34, 8).fill(bill.balance > 0 ? '#FCEAEA' : '#E7F5EC');
     doc.font('B').fontSize(11).fillColor(C.ink).text('Balance due', tx, y + 5, { width: tw * 0.55 });
     doc.font('B').fontSize(15).fillColor(bill.balance > 0 ? C.danger : C.success).text(formatINR(bill.balance, { decimals: true }), tx, y + 3, { width: tw, align: 'right' });
-    y += 50;
+    y += 40;
+    // When the money came in, and the deposit held (informational: never part of the total).
+    for (const [note, color, font] of [[paymentDateLine(bill), bill.paidInFullOn ? C.success : C.soft, 'S'], [depositLine(bill), C.soft, 'R']] as const) {
+      if (!note) continue;
+      doc.font(font).fontSize(9).fillColor(color).text(note, left, y, { width, align: 'right', lineBreak: false });
+      y += 14;
+    }
+    y += 10;
 
     // ---- Payments received ----
     if (bill.payments.length) {

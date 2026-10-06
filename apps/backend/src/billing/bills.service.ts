@@ -1,7 +1,9 @@
 import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { BillItemType, BillStatus, ChargeType, Prisma } from '@prisma/client';
+import { agreementInfo } from '../common/agreement';
 import { AuditService } from '../common/audit.service';
 import { isoDate, localDateOf, monthBounds, monthStart, parseDate, todayLocal } from '../common/dates';
+import { depositSummaries } from '../common/deposits';
 import { OUTSTANDING_BILL_WHERE } from '../common/outstanding';
 import { paginate, skipTake } from '../common/pagination';
 import { PrismaService } from '../common/prisma.service';
@@ -32,13 +34,35 @@ export function effectiveStatus(bill: { status: BillStatus; dueDate: Date }, tod
   return (bill.status === 'GENERATED' || bill.status === 'PARTIALLY_PAID') && bill.dueDate < today ? 'OVERDUE' : bill.status;
 }
 
+type DraftCharge = { type: ChargeType; name: string; amount: number; note?: string };
+
+/**
+ * Bill lines for the charges: Water, Housekeeping, MNGL fuel and WiFi first in that fixed order (at most one line each),
+ * then any other charges as entered. A 0 amount leaves the line off the bill. Totals are unaffected by the order.
+ */
+export function orderCharges(input: { type: ChargeType; name?: string; amount: number; note?: string }[]): DraftCharge[] {
+  const seen = new Set<ChargeType>();
+  const lines = input.map((c) => {
+    if (c.type === 'LATE_FEE') throw new BadRequestException('Enter late fees in the late fee field');
+    if (isMonthlyCharge(c.type)) {
+      if (seen.has(c.type)) throw new BadRequestException(`Only one ${CHARGE_LABEL[c.type]} line is allowed per bill`);
+      seen.add(c.type);
+    }
+    const note = c.note?.trim();
+    return { type: c.type, name: c.name?.trim() || CHARGE_LABEL[c.type], amount: c.amount, ...(note ? { note } : {}) };
+  });
+  const rank = (t: ChargeType) => (isMonthlyCharge(t) ? MONTHLY_CHARGES.indexOf(t) : MONTHLY_CHARGES.length);
+  // Array.prototype.sort is stable, so other charges keep the order they were entered in.
+  return lines.filter((c) => c.amount > 0).sort((a, b) => rank(a.type) - rank(b.type));
+}
+
 interface Draft {
   assignment: Prisma.RoomAssignmentGetPayload<{ include: { room: { include: { property: true } }; tenant: true } }>;
   period: Date;
   dueDate: Date;
   rent: number;
   electricity: ReturnType<typeof calculateElectricity>;
-  charges: { type: ChargeType; name: string; amount: number }[];
+  charges: DraftCharge[];
   totals: ReturnType<typeof calculateBill>;
   carry: { id: string; billNumber: string; balance: number }[];
   /** Pre-system balance, only on an assignment's first live bill. */
@@ -117,10 +141,7 @@ export class BillsService {
       : calculateElectricity(electricityInput);
     if (el.previousReading != null && el.previousReading !== storedPrevious && assignment.electricityMode === 'METER') electricity.isOverride = true;
 
-    const charges = (dto.charges ?? []).map((c) => {
-      if (c.type === 'LATE_FEE') throw new BadRequestException('Enter late fees in the late fee field');
-      return { type: c.type, name: c.name?.trim() || CHARGE_LABEL[c.type], amount: c.amount };
-    });
+    const charges = orderCharges(dto.charges ?? []);
 
     // Unpaid balance of earlier bills rolls into this one.
     const open = await db.bill.findMany({ where: { tenantId: assignment.tenantId, ...OUTSTANDING_BILL_WHERE, billingPeriod: { lt: period } }, orderBy: { billingPeriod: 'asc' } });
@@ -184,7 +205,7 @@ export class BillsService {
             meta: { mode: el.mode, previousReading: el.previousReading, currentReading: el.currentReading, units: el.units, ratePerUnit: el.ratePerUnit, calculatedAmount: el.calculatedAmount, isOverride: el.isOverride },
           });
         }
-        for (const c of draft.charges) items.push({ type: 'CHARGE', description: c.name, amount: c.amount, meta: { chargeType: c.type } });
+        for (const c of draft.charges) items.push({ type: 'CHARGE', description: c.name, amount: c.amount, meta: { chargeType: c.type, ...(c.note ? { note: c.note } : {}) } });
         if (totals.lateFee > 0) items.push({ type: 'LATE_FEE', description: 'Late fee', amount: totals.lateFee });
         if (totals.discount > 0) items.push({ type: 'DISCOUNT', description: 'Discount', amount: -totals.discount });
         if (totals.previousBalance > 0) {
@@ -248,15 +269,32 @@ export class BillsService {
         items: { orderBy: { sortOrder: 'asc' } },
         tenant: { select: { id: true, fullName: true, phone: true } },
         room: { select: { id: true, roomNumber: true } },
-        property: { select: { id: true, name: true, address: true, city: true, state: true, pincode: true } },
+        property: { select: { id: true, name: true, address: true, city: true, state: true, pincode: true, contactPhone: true } },
         payments: { orderBy: [{ paymentDate: 'desc' }, { createdAt: 'desc' }] },
+        assignment: { select: { status: true, agreementStartDate: true, agreementEndDate: true } },
       },
     }),
     this.prisma.bill.findMany({ where: { carriedForwardToId: id, property: { ownerId: userId } }, select: { id: true, billNumber: true, billingPeriod: true } }),
     ]);
     if (!bill) throw new NotFoundException('Bill not found');
-    const carriedInto = bill.carriedForwardToId ? await this.prisma.bill.findUnique({ where: { id: bill.carriedForwardToId }, select: { id: true, billNumber: true } }) : null;
-    return this.present({ ...bill, carriedInto, absorbed });
+    const [carriedInto, deposits] = await Promise.all([
+      bill.carriedForwardToId ? this.prisma.bill.findUnique({ where: { id: bill.carriedForwardToId }, select: { id: true, billNumber: true } }) : null,
+      depositSummaries(this.prisma, [bill.assignmentId]),
+    ]);
+    const { assignment, ...rest } = bill;
+    const deposit = deposits.get(bill.assignmentId);
+    const presented = this.present({ ...rest, carriedInto, absorbed });
+    // Payments are listed newest first by received date, so the first one is the latest money received.
+    const latest = bill.payments[0];
+    const settled = presented.balance <= 0 && bill.status !== 'CANCELLED' && !!latest;
+    return {
+      ...presented,
+      paidInFullOn: settled ? isoDate(latest.paymentDate) : null,
+      lastPayment: latest && !settled ? { amount: money(latest.amount), paymentDate: isoDate(latest.paymentDate) } : null,
+      // Informational only: the deposit is never added to the bill.
+      securityDeposit: deposit && deposit.totalReceived > 0 ? { totalReceived: deposit.totalReceived, lastReceivedOn: deposit.lastReceivedOn } : null,
+      agreement: assignment.status === 'ACTIVE' ? agreementInfo(assignment) : null,
+    };
   }
 
   /** Adds the derived fields every client needs: balance and effective (overdue-aware) status. */

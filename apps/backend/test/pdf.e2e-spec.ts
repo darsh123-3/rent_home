@@ -64,7 +64,7 @@ describe('Bill PDF', () => {
     const text = parsed.text.replace(/\s+/g, ' ');
     for (const expected of [
       'Sunrise Residency', '12 MG Road, Camp', 'Pune, Maharashtra - 411001', 'INVOICE', 'SUN-202609-0001', 'PARTIALLY PAID', '(overdue)',
-      'Rahul Sharma', 'Room 101', '9876543210', 'September 2026', '10 Sep 2026' /* due */, 'Rent', 'Electricity', '1200 to 1350', '150 units',
+      'Rahul Sharma', 'Room 101', '9876543210', 'Bill period 01 Sep 2026 – 30 Sep 2026', '10 Oct 2026' /* due */, 'Last payment ₹5,000 on 10 Sep 2026', 'Rent', 'Electricity', '1200 to 1350', '150 units',
       'Maintenance', 'Water', 'Discount', '₹1,50,000', '₹1,200', '₹500', '₹200', '-₹300',
       'Total', '₹1,51,600', 'Paid', '₹5,000', 'Balance due', '₹1,46,600', 'PAYMENTS RECEIVED', 'UPI', 'UTR998877', 'Pay by the 10th via UPI: sunrise@upi', 'does not require a signature',
     ]) {

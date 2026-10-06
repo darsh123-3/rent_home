@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, RoomStatus } from '@prisma/client';
+import { agreementInfo } from '../common/agreement';
 import { AuditService } from '../common/audit.service';
 import { outstandingByProperties, outstandingByTenant } from '../common/outstanding';
 import { paginate, skipTake } from '../common/pagination';
@@ -85,7 +86,7 @@ export class RoomsService {
     const { assignments, ...rest } = room;
     return {
       ...rest,
-      currentTenant: active ? { ...active.tenant, assignmentId: active.id, startDate: active.startDate, securityDeposit: active.securityDeposit } : null,
+      currentTenant: active ? { ...active.tenant, assignmentId: active.id, startDate: active.startDate, securityDeposit: active.securityDeposit, ...agreementInfo(active) } : null,
       monthlyRent: active ? active.agreedRent : room.defaultRent,
       balance: active ? balances.get(active.tenantId) ?? 0 : 0,
       previousTenants: assignments
