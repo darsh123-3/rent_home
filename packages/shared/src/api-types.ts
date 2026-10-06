@@ -1,5 +1,33 @@
 /** Shapes returned by the REST API, shared by the mobile and web apps. */
-import type { BillStatus, ChargeType, DocumentType, ElectricityMode, PaymentMethod, RoomStatus, TenantStatus } from './index';
+import type { AgreementStatus, BillStatus, ChargeType, DocumentType, ElectricityMode, PaymentMethod, RoomStatus, TenantStatus } from './index';
+
+/** Rental agreement validity of a stay. Dates are YYYY-MM-DD; daysLeft is negative once expired. */
+export interface AgreementInfo {
+  agreementStartDate: string | null;
+  agreementEndDate: string | null;
+  agreementStatus: AgreementStatus;
+  agreementDaysLeft: number | null;
+}
+
+export interface DepositReceipt {
+  id: string;
+  amount: number;
+  receivedOn: string;
+  method: PaymentMethod;
+  note: string | null;
+  createdAt: string;
+}
+
+/** Security deposit of a stay. `agreed` is the agreed amount; the rest is computed from the receipts. Never part of a bill total. */
+export interface SecurityDepositSummary {
+  assignmentId: string;
+  agreed: number;
+  totalReceived: number;
+  pending: number;
+  lastReceivedOn: string | null;
+  receipts: DepositReceipt[];
+}
+
 export interface Property {
   id: string;
   name: string;
@@ -13,6 +41,8 @@ export interface Property {
   defaultRatePerUnit: number;
   billFooterNote: string | null;
   upiId: string | null;
+  /** Landlord phone printed under the address on bills. */
+  contactPhone: string | null;
   roomCount?: number;
   occupiedCount?: number;
 }
@@ -35,7 +65,7 @@ export interface Room {
 
 export interface RoomDetail extends Omit<Room, 'currentTenant'> {
   property: { id: string; name: string };
-  currentTenant: { id: string; fullName: string; phone: string; assignmentId: string; startDate: string; securityDeposit: number } | null;
+  currentTenant: ({ id: string; fullName: string; phone: string; assignmentId: string; startDate: string; securityDeposit: number } & AgreementInfo) | null;
   previousTenants: { assignmentId: string; tenantId: string; fullName: string; startDate: string; endDate: string | null; agreedRent: number }[];
 }
 
@@ -50,6 +80,8 @@ export interface TenantListItem {
   assignmentId: string | null;
   monthlyRent: number | null;
   balance: number;
+  /** Agreement of the current stay; null for tenants without an active room. */
+  agreement: AgreementInfo | null;
 }
 
 export interface RentHistoryEntry { id: string; amount: number; effectiveFrom: string }
@@ -72,7 +104,7 @@ export interface TenantDetail {
   property: { id: string; name: string };
   outstanding: number;
   documentTypes: DocumentType[];
-  currentAssignment: {
+  currentAssignment: ({
     id: string;
     room: { id: string; roomNumber: string };
     startDate: string;
@@ -83,7 +115,7 @@ export interface TenantDetail {
     fixedElectricity: number | null;
     initialMeterReading: number | null;
     rents: RentHistoryEntry[];
-  } | null;
+  } & AgreementInfo) | null;
   lastAssignment: { id: string; room: { id: string; roomNumber: string }; startDate: string; endDate: string | null; agreedRent: number; securityDeposit: number } | null;
   roomHistory: {
     assignmentId: string;
@@ -96,6 +128,8 @@ export interface TenantDetail {
     finalMeterReading: number | null;
     moveOutNotes: string | null;
   }[];
+  /** Deposit of the current stay, or of the last one after moving out. */
+  securityDeposit: SecurityDepositSummary | null;
 }
 
 export interface TenantDocumentItem {
@@ -119,6 +153,9 @@ export interface BillListItem {
   paidAmount: number;
   balance: number;
   carriedForwardToId: string | null;
+  /** First and last day of the billing month (YYYY-MM-DD). */
+  billPeriodStart: string;
+  billPeriodEnd: string;
   tenant: { id: string; fullName: string };
   room: { id: string; roomNumber: string };
 }
@@ -158,11 +195,24 @@ export interface BillDetail {
   paidAmount: number;
   balance: number;
   notes: string | null;
+  createdAt: string;
+  /** India calendar day the bill was generated (YYYY-MM-DD). */
+  issuedOn: string;
+  billPeriodStart: string;
+  billPeriodEnd: string;
+  /** Received date of the payment that settled the bill; null while a balance is open. */
+  paidInFullOn: string | null;
+  /** The most recent payment, shown while the bill is part paid. */
+  lastPayment: { amount: number; paymentDate: string } | null;
+  /** Informational only: never part of the bill total. Null when no deposit receipt is recorded. */
+  securityDeposit: { totalReceived: number; lastReceivedOn: string | null } | null;
+  /** Agreement of the tenant's stay while it is active; null after moving out. */
+  agreement: AgreementInfo | null;
   items: BillItemRow[];
   payments: PaymentRow[];
   tenant: { id: string; fullName: string; phone: string };
   room: { id: string; roomNumber: string };
-  property: { id: string; name: string; address: string; city: string; state: string; pincode: string };
+  property: { id: string; name: string; address: string; city: string; state: string; pincode: string; contactPhone: string | null };
   carriedInto: { id: string; billNumber: string } | null;
   absorbed: { id: string; billNumber: string; billingPeriod: string }[];
 }
@@ -188,7 +238,7 @@ export interface BillPreview {
     /** The rate stored for this stay (a rate typed for one bill does not change it). */
     defaultRatePerUnit: number | null;
   };
-  charges: { type: ChargeType; name: string; amount: number }[];
+  charges: { type: ChargeType; name: string; amount: number; note?: string }[];
   totals: { rent: number; electricity: number; otherCharges: number; lateFee: number; discount: number; subtotal: number; previousBalance: number; totalDue: number };
   carriedBills: { id: string; billNumber: string; balance: number }[];
   openingBalance: number;
@@ -283,6 +333,8 @@ export interface CollectionReport {
   pending: number;
   collectionRate: number;
   byMethod: { method: PaymentMethod; amount: number; count: number }[];
+  /** Charge lines billed in the month, by category: WATER, CLEANING, MNGL_GAS, INTERNET and OTHER (every other charge). */
+  byCategory: { category: 'WATER' | 'CLEANING' | 'MNGL_GAS' | 'INTERNET' | 'OTHER'; label: string; amount: number; count: number }[];
   trend: { month: string; label: string; expected: number; collected: number }[];
 }
 

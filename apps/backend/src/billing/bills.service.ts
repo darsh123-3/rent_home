@@ -12,9 +12,15 @@ import { renderBillStatementPdf } from './bill-statement-pdf';
 import { calculateBill, calculateElectricity, fromPaise, rentForPeriod, toPaise } from './bill-calculator';
 import { CreateBillDto, ListBillsQuery, PreviewBillDto, RecurringChargeDto } from './bills.dto';
 
+/** Bill line names. CLEANING is shown as Housekeeping and INTERNET as WiFi; the stored categories keep their meaning. */
 export const CHARGE_LABEL: Record<ChargeType, string> = {
-  MAINTENANCE: 'Maintenance', WATER: 'Water', CLEANING: 'Cleaning', INTERNET: 'Internet', PARKING: 'Parking', REPAIR: 'Repair', LATE_FEE: 'Late fee', OTHER: 'Other',
+  WATER: 'Water bill', CLEANING: 'Housekeeping', MNGL_GAS: 'MNGL fuel bill', INTERNET: 'WiFi connection',
+  MAINTENANCE: 'Maintenance', PARKING: 'Parking', REPAIR: 'Repair', LATE_FEE: 'Late fee', OTHER: 'Other',
 };
+
+/** Monthly charges with their own line on every bill, in this order after electricity (at most one line each). */
+export const MONTHLY_CHARGES = ['WATER', 'CLEANING', 'MNGL_GAS', 'INTERNET'] as const satisfies readonly ChargeType[];
+export const isMonthlyCharge = (t: ChargeType): t is (typeof MONTHLY_CHARGES)[number] => (MONTHLY_CHARGES as readonly ChargeType[]).includes(t);
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 export const monthLabel = (d: Date) => `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
