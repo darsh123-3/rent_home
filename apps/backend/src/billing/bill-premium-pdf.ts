@@ -1,6 +1,7 @@
 import * as path from 'path';
 import PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
+import { todayLocal } from '../common/dates';
 import { formatDate, formatDateLocal, formatINR } from '../common/format';
 import type { PdfBill } from './bill-pdf';
 import { monthLabel } from './bills.service';
@@ -69,8 +70,8 @@ export function breakdownLines(bill: PdfBill): Line[] {
 const signed = (n: number) => (n < 0 ? `-${formatINR(-n)}` : formatINR(n));
 
 /** The state shown on the hero card: what the reader should do. */
-export function heroState(bill: PdfBill, now = new Date()) {
-  const overdueDays = Math.max(0, Math.floor((now.getTime() - bill.dueDate.getTime()) / 86_400_000));
+export function heroState(bill: PdfBill, today = todayLocal()) {
+  const overdueDays = Math.max(0, Math.round((today.getTime() - bill.dueDate.getTime()) / 86_400_000));
   if (bill.status === 'CANCELLED') return { label: 'CANCELLED', amount: 'This bill was cancelled', sub: 'No payment is due.', tone: 'muted' as Tone };
   if (bill.balance <= 0) return { label: 'PAID IN FULL', amount: formatINR(0), sub: 'Thank you. Nothing is due.', tone: 'success' as Tone };
   if (bill.overdue || overdueDays > 0) return { label: 'BALANCE DUE', amount: formatINR(bill.balance), sub: `Overdue since ${formatDate(bill.dueDate)}${overdueDays ? ` (${overdueDays} ${overdueDays === 1 ? 'day' : 'days'})` : ''}`, tone: 'danger' as Tone };

@@ -6,7 +6,7 @@ import { breakdownLines, heroState, renderBillPremiumPdf, upiLink } from '../src
 import { renderBillStatementPdf, statementRows } from '../src/billing/bill-statement-pdf';
 import { formatINR } from '../src/common/format';
 import { PrismaService } from '../src/common/prisma.service';
-import { createTestApp, createUserAndLogin, resetDb } from './helpers';
+import { createTestApp, createUserAndLogin, resetClock, resetDb, setClock } from './helpers';
 
 type Client = Awaited<ReturnType<typeof createUserAndLogin>>;
 
@@ -26,6 +26,7 @@ describe('Bill PDF', () => {
   let billId: string;
 
   beforeAll(async () => {
+    setClock('2026-10-15T06:00:00Z'); // after the September bills fall due (10 Oct 2026)
     ({ app, prisma } = await createTestApp());
     await resetDb(prisma);
     owner = await createUserAndLogin(app, prisma, 'owner');
@@ -40,7 +41,7 @@ describe('Bill PDF', () => {
     })).body.data.id;
     await owner.post(`/bills/${billId}/payments`, { amount: 5000, paymentDate: '2026-09-10', method: 'UPI', reference: 'UTR998877' }).expect(201);
   });
-  afterAll(() => app.close());
+  afterAll(async () => { await app.close(); resetClock(); });
 
   it('formats Indian rupees with lakh grouping', () => {
     expect(formatINR(150000)).toBe('₹1,50,000');

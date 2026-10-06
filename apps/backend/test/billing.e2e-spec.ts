@@ -1,6 +1,6 @@
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { PrismaService } from '../src/common/prisma.service';
-import { createTestApp, createUserAndLogin, resetDb } from './helpers';
+import { createTestApp, createUserAndLogin, resetClock, resetDb, setClock } from './helpers';
 
 type Client = Awaited<ReturnType<typeof createUserAndLogin>>;
 
@@ -16,6 +16,7 @@ describe('Billing (e2e)', () => {
   let sepBillId: string;
 
   beforeAll(async () => {
+    setClock('2026-10-15T06:00:00Z'); // after the September bills fall due (10 Oct 2026)
     ({ app, prisma } = await createTestApp());
     await resetDb(prisma);
     owner = await createUserAndLogin(app, prisma, 'owner');
@@ -30,7 +31,7 @@ describe('Billing (e2e)', () => {
     tenantId = t.id;
     assignmentId = t.currentAssignment.id;
   });
-  afterAll(() => app.close());
+  afterAll(async () => { await app.close(); resetClock(); });
 
   const septemberBody = (extra: object = {}) => ({
     assignmentId, billingPeriod: '2026-09',

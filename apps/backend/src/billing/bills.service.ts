@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { BillItemType, BillStatus, ChargeType, Prisma } from '@prisma/client';
 import { AuditService } from '../common/audit.service';
-import { monthStart, parseDate, todayUtc } from '../common/dates';
+import { isoDate, localDateOf, monthBounds, monthStart, parseDate, todayLocal } from '../common/dates';
 import { OUTSTANDING_BILL_WHERE } from '../common/outstanding';
 import { paginate, skipTake } from '../common/pagination';
 import { PrismaService } from '../common/prisma.service';
@@ -22,7 +22,7 @@ const addMonths = (d: Date, n: number) => new Date(Date.UTC(d.getUTCFullYear(), 
 const money = (d: Prisma.Decimal | number) => (typeof d === 'number' ? d : d.toNumber());
 
 /** OVERDUE is derived from the due date, so no background job is needed. */
-export function effectiveStatus(bill: { status: BillStatus; dueDate: Date }, today = todayUtc()): BillStatus {
+export function effectiveStatus(bill: { status: BillStatus; dueDate: Date }, today = todayLocal()): BillStatus {
   return (bill.status === 'GENERATED' || bill.status === 'PARTIALLY_PAID') && bill.dueDate < today ? 'OVERDUE' : bill.status;
 }
 
@@ -66,7 +66,7 @@ export class BillsService {
   private async suggestPeriod(a: { id: string; startDate: Date; endDate: Date | null }) {
     const last = await this.prisma.bill.findFirst({ where: { assignmentId: a.id, status: { not: 'CANCELLED' } }, orderBy: { billingPeriod: 'desc' } });
     // Month M is billed in month M+1, once M's meter reading is in: the first suggestion is the last completed month.
-    let period = last ? addMonths(last.billingPeriod, 1) : addMonths(monthStart(todayUtc()), -1);
+    let period = last ? addMonths(last.billingPeriod, 1) : addMonths(monthStart(todayLocal()), -1);
     if (period < monthStart(a.startDate)) period = monthStart(a.startDate);
     if (a.endDate && period > monthStart(a.endDate)) period = monthStart(a.endDate);
     return period;
@@ -80,7 +80,7 @@ export class BillsService {
 
     if (period < monthStart(assignment.startDate)) throw new BadRequestException('This is before the tenant moved in');
     if (assignment.endDate && period > monthStart(assignment.endDate)) throw new BadRequestException('This is after the tenant moved out');
-    if (period > addMonths(monthStart(todayUtc()), 1)) throw new BadRequestException('Bills can be generated up to one month ahead');
+    if (period > addMonths(monthStart(todayLocal()), 1)) throw new BadRequestException('Bills can be generated up to one month ahead');
 
     const live = { assignmentId: assignment.id, status: { not: 'CANCELLED' as BillStatus } };
     const existing = await db.bill.findFirst({ where: { ...live, billingPeriod: period } });
@@ -203,6 +203,8 @@ export class BillsService {
             previousBalance: totals.previousBalance,
             totalDue: totals.totalDue,
             notes: draft.notes,
+            // The issue moment comes from the app's clock; its India calendar day is the bill's "Issued on" date.
+            createdAt: new Date(),
             items: { create: items.map((i, idx) => ({ ...i, sortOrder: idx })) },
           },
         });
@@ -252,15 +254,26 @@ export class BillsService {
   }
 
   /** Adds the derived fields every client needs: balance and effective (overdue-aware) status. */
-  present<T extends { status: BillStatus; dueDate: Date; totalDue: Prisma.Decimal; paidAmount: Prisma.Decimal }>(bill: T) {
+  present<T extends { status: BillStatus; dueDate: Date; billingPeriod: Date; createdAt?: Date; totalDue: Prisma.Decimal; paidAmount: Prisma.Decimal }>(bill: T) {
     const balance = fromPaise(toPaise(money(bill.totalDue)) - toPaise(money(bill.paidAmount)));
-    return { ...bill, storedStatus: bill.status, status: effectiveStatus(bill), balance };
+    const period = monthBounds(bill.billingPeriod);
+    return {
+      ...bill,
+      storedStatus: bill.status,
+      status: effectiveStatus(bill),
+      balance,
+      // "Bill period" as a date range: first to last day of the billing month.
+      billPeriodStart: isoDate(period.start),
+      billPeriodEnd: isoDate(period.end),
+      // "Issued on": the India calendar day the bill was generated (createdAt is a UTC instant).
+      ...(bill.createdAt ? { issuedOn: isoDate(localDateOf(bill.createdAt)) } : {}),
+    };
   }
 
   async list(userId: string, q: ListBillsQuery) {
     const propertyIds = q.propertyId ? [q.propertyId] : await this.properties.ownedIds(userId);
     const search = q.search?.trim();
-    const today = todayUtc();
+    const today = todayLocal();
     const where: Prisma.BillWhereInput = {
       propertyId: { in: propertyIds },
       ...(q.tenantId ? { tenantId: q.tenantId } : {}),

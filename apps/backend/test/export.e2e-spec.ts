@@ -2,7 +2,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import * as ExcelJS from 'exceljs';
 import request from 'supertest';
 import { PrismaService } from '../src/common/prisma.service';
-import { createTestApp, createUserAndLogin, resetDb } from './helpers';
+import { createTestApp, createUserAndLogin, resetClock, resetDb, setClock } from './helpers';
 
 type Client = Awaited<ReturnType<typeof createUserAndLogin>>;
 
@@ -39,6 +39,7 @@ describe('Excel export (e2e)', () => {
   let propertyId: string;
 
   beforeAll(async () => {
+    setClock('2026-09-28T06:00:00Z'); // the export covers the current month: September 2026
     ({ app, prisma } = await createTestApp());
     await resetDb(prisma);
     owner = await createUserAndLogin(app, prisma, 'owner');
@@ -56,7 +57,7 @@ describe('Excel export (e2e)', () => {
     const p2 = (await other.post('/properties', { name: 'Secret House', address: 'X', city: 'Y', state: 'Z', pincode: '111111' })).body.data.id;
     await other.post('/rooms', { propertyId: p2, roomNumber: 'S1', defaultRent: 1, electricityMode: 'NONE' });
   });
-  afterAll(() => app.close());
+  afterAll(async () => { await app.close(); resetClock(); });
 
   it('requires a login', async () => {
     await request(app.getHttpServer()).get('/exports/excel').expect(401);
@@ -67,7 +68,7 @@ describe('Excel export (e2e)', () => {
     expect(res.headers['content-type']).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     expect(res.headers['content-disposition']).toMatch(/^attachment; filename="RentManager-export-\d{4}-\d{2}-\d{2}\.xlsx"$/);
     const wb = await open(res.body as Buffer);
-    expect(wb.worksheets.map((w) => w.name)).toEqual(['Summary', 'Rooms', 'Tenants', 'Stays', 'Bills', 'Bill items', 'Payments', 'Electricity', 'Outstanding', 'Monthly']);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(['Summary', 'Tenant Ledger', 'Rooms', 'Tenants', 'Stays', 'Bills', 'Bill items', 'Payments', 'Electricity', 'Outstanding', 'Monthly']);
   });
 
   it('exports rooms, tenants with what they owe, bills, payments and electricity readings', async () => {

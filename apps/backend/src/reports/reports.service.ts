@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { fromPaise, toPaise } from '../billing/bill-calculator';
 import { monthLabel } from '../billing/bills.service';
-import { todayUtc } from '../common/dates';
+import { todayLocal } from '../common/dates';
 import { OUTSTANDING_BILL_WHERE } from '../common/outstanding';
 import { PrismaService } from '../common/prisma.service';
 import { PropertiesService } from '../properties/properties.service';
@@ -11,7 +11,7 @@ const MS_DAY = 86_400_000;
 const num = (d: Prisma.Decimal | number | null | undefined) => (d == null ? 0 : typeof d === 'number' ? d : d.toNumber());
 const ymOf = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 
-export const currentMonth = () => ymOf(todayUtc());
+export const currentMonth = () => ymOf(todayLocal());
 const bounds = (ym: string) => {
   const [y, m] = ym.split('-').map(Number);
   return { start: new Date(Date.UTC(y, m - 1, 1)), end: new Date(Date.UTC(y, m, 0)) };
@@ -120,7 +120,7 @@ export class ReportsService {
 
   async outstandingFor(propertyIds: string[]) {
     const open = await this.openBills(propertyIds);
-    const today = todayUtc();
+    const today = todayLocal();
     const byTenant = new Map<string, { balance: number; oldestDue: Date; billCount: number; billId: string; roomId: string; tenant: (typeof open)[number]['tenant']; roomNumber: string }>();
     for (const b of open) {
       const cur = byTenant.get(b.tenantId);
@@ -164,7 +164,7 @@ export class ReportsService {
 
   /** Smaller numbers the Home screen shows next to the big ones. All run in parallel with the other dashboard queries. */
   async extrasFor(propertyIds: string[]) {
-    const today = todayUtc();
+    const today = todayLocal();
     const thisMonth = shift(ymOf(today), -1); // the month whose bills are being prepared now (last month's readings)
     const week = new Date(today.getTime() - 6 * MS_DAY);
     const inProperty = { room: { propertyId: { in: propertyIds } } };

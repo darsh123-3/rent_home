@@ -18,6 +18,15 @@ const schema = z.object({
   CORS_ORIGINS: z.string().default(''),
   /** Number of reverse proxies in front of the API (Render/Railway/Fly/Nginx = 1). 0 when exposed directly. */
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+  /** Time zone for "today", bill issue dates and payment dates. */
+  APP_TIMEZONE: z.string().default('Asia/Kolkata').refine((tz) => {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone: tz });
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'APP_TIMEZONE must be a valid IANA time zone such as Asia/Kolkata'),
 });
 
 export type Env = z.infer<typeof schema>;

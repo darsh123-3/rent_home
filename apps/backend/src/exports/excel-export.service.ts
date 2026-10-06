@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import { effectiveStatus } from '../billing/bills.service';
 import { AuditService } from '../common/audit.service';
-import { todayUtc } from '../common/dates';
+import { isoDate, todayLocal } from '../common/dates';
 import { PrismaService } from '../common/prisma.service';
 import { PropertiesService } from '../properties/properties.service';
 
@@ -50,7 +50,7 @@ export class ExcelExportService {
   async build(userId: string, propertyId?: string): Promise<{ buffer: Buffer; fileName: string }> {
     const ids = propertyId ? [(await this.properties.assertOwned(userId, propertyId)).id] : await this.properties.ownedIds(userId);
     const inProp = { propertyId: { in: ids } };
-    const today = todayUtc();
+    const today = todayLocal();
     const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
     const nextMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
 
@@ -278,7 +278,7 @@ export class ExcelExportService {
 
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
     await this.audit.log(userId, 'export.excel', 'property', propertyId, { bills: monthBills.length, payments: monthPayments.length });
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = isoDate(today);
     return { buffer, fileName: `RentManager-export-${stamp}.xlsx` };
   }
 }
