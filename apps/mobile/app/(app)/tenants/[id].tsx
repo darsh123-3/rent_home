@@ -6,11 +6,13 @@ import { Badge, Button, Card, Chip, DetailRow, ErrorState, Header, Icon, Screen,
 import { BillsSection } from '@/features/bills/BillsSection';
 import { DocumentsSection } from '@/features/documents/DocumentsSection';
 import { PaymentsSection } from '@/features/payments/PaymentsSection';
+import { AgreementBadge } from '@/features/tenants/AgreementBadge';
 import { useTenant } from '@/features/tenants/api';
 import { ChangeRentSheet } from '@/features/tenants/ChangeRentSheet';
 import { ElectricityHistory } from '@/features/tenants/ElectricityHistory';
 import { ElectricitySheet } from '@/features/tenants/ElectricitySheet';
 import { callPhone, openWhatsApp } from '@/features/tenants/contact';
+import { SecurityDepositSection } from '@/features/tenants/SecurityDepositSection';
 import { Avatar } from '@/features/tenants/TenantCard';
 import { formatDate, formatINR, formatMonthShort } from '@/utils/format';
 
@@ -45,6 +47,7 @@ export default function TenantProfileScreen() {
         <Text variant="title" className="mt-2 text-center">{t.fullName}</Text>
         <Text tone="soft">{a ? `Room ${a.room.roomNumber}` : 'No room assigned'} · {t.property.name}</Text>
         {t.status === 'MOVED_OUT' ? <View className="mt-1"><Badge label="Moved out" tone="neutral" /></View> : null}
+        {a ? <View className="mt-1"><AgreementBadge agreement={a} /></View> : null}
         {t.phone ? (
           <View className="mt-4 w-full flex-row gap-3">
             <View className="flex-1"><Button label="Call" icon={Phone} variant="secondary" onPress={() => callPhone(t.phone)} /></View>
@@ -63,7 +66,8 @@ export default function TenantProfileScreen() {
         <>
           <Card className="mt-4">
             <DetailRow label="Monthly Rent" value={summary ? formatINR(summary.agreedRent) : '-'} />
-            <DetailRow label="Deposit" value={summary ? formatINR(summary.securityDeposit) : '-'} />
+            <DetailRow label="Agreed security deposit" value={summary ? formatINR(summary.securityDeposit) : '-'} />
+            {a ? <DetailRow label="Agreement" value={a.agreementStartDate || a.agreementEndDate ? `${a.agreementStartDate ? formatDate(a.agreementStartDate) : '...'} to ${a.agreementEndDate ? formatDate(a.agreementEndDate) : '...'}` : 'Dates not added'} /> : null}
             {a ? (
               <DetailRow label="Electricity" value={a.electricityMode === 'METER' ? `${formatINR(a.ratePerUnit)} / unit` : a.electricityMode === 'FIXED' ? `Fixed ${formatINR(a.fixedElectricity)}` : 'Not charged'} />
             ) : null}
@@ -82,6 +86,8 @@ export default function TenantProfileScreen() {
               <Button label="Assign Room" icon={UserPlus} onPress={() => router.push({ pathname: '/tenants/assign', params: { id: t.id } })} />
             ) : null}
           </View>
+
+          {t.securityDeposit ? <SecurityDepositSection deposit={t.securityDeposit} /> : null}
 
           <SectionHeader title="Contact" />
           <Card>
@@ -128,7 +134,7 @@ export default function TenantProfileScreen() {
                   <Badge label={h.status === 'ACTIVE' ? 'Current' : 'Closed'} tone={h.status === 'ACTIVE' ? 'success' : 'neutral'} />
                 </View>
                 <Text tone="soft">{formatDate(h.startDate)} to {h.endDate ? formatDate(h.endDate) : 'Present'}</Text>
-                <Text variant="secondary" tone="soft">{formatINR(h.agreedRent)} / month · Deposit {formatINR(h.securityDeposit)}</Text>
+                <Text variant="secondary" tone="soft">{formatINR(h.agreedRent)} / month · Agreed deposit {formatINR(h.securityDeposit)}</Text>
                 {h.moveOutNotes ? <Text variant="secondary" tone="muted">{h.moveOutNotes}</Text> : null}
               </Card>
             ))

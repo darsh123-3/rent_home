@@ -10,8 +10,12 @@ import { useChangeElectricity } from '@/features/tenants/api';
 import { ChargeRow, ChargeSheet } from '@/features/bills/ChargeSheet';
 import { useProperty } from '@/features/properties/PropertyProvider';
 import { useDebounced } from '@/hooks/useDebounced';
-import type { Paginated, TenantListItem } from '@/types/api';
+import { CHARGE_LABELS, isMonthlyCharge, MONTHLY_CHARGE_TYPES, type MonthlyChargeType, type Paginated, type TenantListItem } from '@/types/api';
 import { formatDate, formatINR, formatYM, toYM } from '@/utils/format';
+
+/** One editable line per monthly category; blank or 0 leaves it off this bill. */
+interface MonthlyRow { amount: string; name?: string; note: string }
+const emptyMonthly = (): Record<MonthlyChargeType, MonthlyRow> => ({ WATER: { amount: '', note: '' }, CLEANING: { amount: '', note: '' }, MNGL_GAS: { amount: '', note: '' }, INTERNET: { amount: '', note: '' } });
 
 const num = (s: string) => (s.trim() !== '' && /^\d+(\.\d{1,2})?$/.test(s.trim()) ? Number(s) : undefined);
 
@@ -26,6 +30,7 @@ export default function GenerateBillScreen() {
   const [rate, setRate] = useState('');
   const [manual, setManual] = useState(false);
   const [manualAmount, setManualAmount] = useState('');
+  const [monthly, setMonthly] = useState(emptyMonthly);
   const [charges, setCharges] = useState<ChargeRow[]>([]);
   const [seeded, setSeeded] = useState(false);
   const [lateFee, setLateFee] = useState('');
@@ -52,11 +57,14 @@ export default function GenerateBillScreen() {
         ...(prevReading.trim() !== '' && num(prevReading) !== undefined ? { previousReading: num(prevReading) } : {}),
         ...(rate.trim() !== '' && num(rate) !== undefined ? { ratePerUnit: num(rate) } : {}),
       },
-      charges: charges.filter((c) => num(c.amount)).map((c) => ({ type: c.type, name: c.name, amount: Number(c.amount) })),
+      charges: [
+        ...MONTHLY_CHARGE_TYPES.filter((t) => num(monthly[t].amount)).map((t) => ({ type: t, name: monthly[t].name, amount: Number(monthly[t].amount), note: monthly[t].note.trim() || undefined })),
+        ...charges.filter((c) => num(c.amount)).map((c) => ({ type: c.type, name: c.name, amount: Number(c.amount) })),
+      ],
       lateFee: num(lateFee),
       discount: num(discount),
     };
-  }, [tenantId, period, dueDate, manual, reading, prevReading, rate, manualAmount, charges, lateFee, discount]);
+  }, [tenantId, period, dueDate, manual, reading, prevReading, rate, manualAmount, monthly, charges, lateFee, discount]);
 
   const debounced = useDebounced(request, 400);
   const preview = useBillPreview(debounced);
@@ -68,7 +76,15 @@ export default function GenerateBillScreen() {
   if (data && !seeded) {
     setSeeded(true);
     setPeriod(toYM(data.billingPeriod));
-    if (data.recurringCharges.length) setCharges(data.recurringCharges.map((c) => ({ type: c.type, name: c.name, amount: String(c.amount) })));
+    // Recurring Water / Housekeeping / MNGL / WiFi fill their own row (first one of each); anything else is an other charge.
+    const seed = emptyMonthly();
+    const others: ChargeRow[] = [];
+    for (const c of data.recurringCharges) {
+      if (isMonthlyCharge(c.type) && !seed[c.type].amount) seed[c.type] = { amount: String(c.amount), name: c.name, note: '' };
+      else others.push({ type: c.type, name: c.name, amount: String(c.amount) });
+    }
+    setMonthly(seed);
+    setCharges(others);
   }
 
   const el = data?.electricity;
@@ -121,7 +137,7 @@ export default function GenerateBillScreen() {
               <Text variant="heading">{data?.tenant.fullName ?? ' '}</Text>
               <Text variant="secondary" tone="soft">{data ? `Room ${data.room.roomNumber}` : ' '}</Text>
             </View>
-            {!params.tenantId ? <Pressable onPress={() => { setTenantId(undefined); setSeeded(false); setPeriod(undefined); setCharges([]); setReading(''); setPrevReading(''); }} accessibilityRole="button"><Text variant="secondaryMedium" tone="primary">Change</Text></Pressable> : null}
+            {!params.tenantId ? <Pressable onPress={() => { setTenantId(undefined); setSeeded(false); setPeriod(undefined); setMonthly(emptyMonthly()); setCharges([]); setReading(''); setPrevReading(''); }} accessibilityRole="button"><Text variant="secondaryMedium" tone="primary">Change</Text></Pressable> : null}
           </Card>
 
           {period ? <MonthStepper label="Billing Month" value={period} onChange={setPeriod} /> : <Skeleton height={48} radius={12} />}
@@ -164,11 +180,30 @@ export default function GenerateBillScreen() {
                 </Card>
               ) : null}
 
-              <SectionHeader title="Other Charges" actionLabel="Add" onAction={() => setChargeSheet(true)} />
+              <SectionHeader title="Monthly charges" />
+              <Card padded={false}>
+                {MONTHLY_CHARGE_TYPES.map((t, i) => {
+                  const row = monthly[t];
+                  const label = row.name ?? CHARGE_LABELS[t];
+                  const set = (patch: Partial<MonthlyRow>) => setMonthly((cur) => ({ ...cur, [t]: { ...cur[t], ...patch } }));
+                  return (
+                    <View key={t} className={`gap-2 px-4 py-2 ${i < MONTHLY_CHARGE_TYPES.length - 1 ? 'border-b border-line' : ''}`}>
+                      <View className="flex-row items-center">
+                        <Text className="flex-1" variant="bodyMedium">{label}</Text>
+                        <View className="w-28"><Input accessibilityLabel={`${label} amount`} prefix="₹" keyboardType="decimal-pad" placeholder="0" value={row.amount} onChangeText={(v) => set({ amount: v })} /></View>
+                      </View>
+                      {t === 'MNGL_GAS' && num(row.amount) ? <Input accessibilityLabel="MNGL note" placeholder="Units or reading (optional)" maxLength={60} value={row.note} onChangeText={(v) => set({ note: v })} /> : null}
+                    </View>
+                  );
+                })}
+              </Card>
+              <Text variant="caption" tone="muted">Prefilled from the tenant&apos;s regular charges. Change an amount for this bill only; leave it blank or 0 to leave the line off.</Text>
+
+              <SectionHeader title="Other charges" actionLabel="Add other charge" onAction={() => setChargeSheet(true)} />
               {charges.length === 0 ? (
                 <Card className="items-center gap-2 py-5">
                   <Text tone="soft">No other charges</Text>
-                  <Button label="Add Charge" icon={Plus} variant="secondary" size="sm" fullWidth={false} onPress={() => setChargeSheet(true)} />
+                  <Button label="Add other charge" icon={Plus} variant="secondary" size="sm" fullWidth={false} onPress={() => setChargeSheet(true)} />
                 </Card>
               ) : (
                 <Card padded={false}>
@@ -206,7 +241,8 @@ export default function GenerateBillScreen() {
           ) : null}
         </View>
       )}
-      <ChargeSheet visible={chargeSheet} onClose={() => setChargeSheet(false)} onAdd={(row) => setCharges((cur) => [...cur, row])} />
+      <ChargeSheet visible={chargeSheet} onClose={() => setChargeSheet(false)}
+        onAdd={(row) => (isMonthlyCharge(row.type) ? setMonthly((cur) => ({ ...cur, [row.type]: { ...cur[row.type as MonthlyChargeType], amount: row.amount, name: row.name } })) : setCharges((cur) => [...cur, row]))} />
     </Screen>
   );
 }

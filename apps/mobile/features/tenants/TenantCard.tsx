@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { Badge, Card, Icon, Text } from '@/components/ui';
 import { formatINR, initials } from '@/utils/format';
 import type { TenantListItem } from '@/types/api';
+import { AgreementBadge } from './AgreementBadge';
 
 export function Avatar({ name, size = 44 }: { name: string; size?: number }) {
   return (
@@ -32,6 +33,7 @@ export function TenantCard({ tenant, onPress }: { tenant: TenantListItem; onPres
             {tenant.balance > 0 ? <Text variant="bodyMedium" tone="danger" className="font-semibold">{formatINR(tenant.balance)} pending</Text> : null}
           </View>
         ) : null}
+        {!movedOut ? <AgreementBadge agreement={tenant.agreement} compact /> : null}
       </View>
     </Card>
   );

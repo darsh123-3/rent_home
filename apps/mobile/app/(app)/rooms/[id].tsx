@@ -4,6 +4,7 @@ import { Pressable, View } from 'react-native';
 import { Badge, Button, Card, DetailRow, ErrorState, Header, Icon, Screen, SectionHeader, SkeletonList, Text } from '@/components/ui';
 import { useRoom } from '@/features/rooms/api';
 import { ROOM_STATUS } from '@/features/rooms/RoomCard';
+import { AgreementBadge } from '@/features/tenants/AgreementBadge';
 import { formatDate, formatINR, formatMonthShort } from '@/utils/format';
 
 export default function RoomDetailScreen() {
@@ -33,6 +34,7 @@ export default function RoomDetailScreen() {
         </View>
         <DetailRow label="Property" value={room.property.name} />
         <DetailRow label="Current Tenant" value={tenant?.fullName ?? 'None'} />
+        {tenant && tenant.agreementStatus !== 'NONE' ? <View className="items-end border-b border-line py-2"><AgreementBadge agreement={tenant} compact /></View> : null}
         <DetailRow label="Monthly Rent" value={formatINR(room.monthlyRent)} />
         <DetailRow label="Pending" value={tenant ? (room.balance > 0 ? formatINR(room.balance) : 'Paid') : '-'} tone={room.balance > 0 ? 'danger' : 'ink'} />
         <DetailRow label="Electricity" value={room.electricityMode === 'METER' ? `Meter, ${formatINR(room.ratePerUnit)} / unit` : room.electricityMode === 'FIXED' ? `Fixed ${formatINR(room.fixedElectricity)}` : 'Not charged'} last />

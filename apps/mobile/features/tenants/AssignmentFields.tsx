@@ -6,7 +6,7 @@ import { Card, DateField, EmptyState, Icon, MoneyField, SegmentedControl, Skelet
 import { useProperty } from '@/features/properties/PropertyProvider';
 import { useRooms } from '@/features/rooms/api';
 import { cn } from '@/utils/cn';
-import { formatINR } from '@/utils/format';
+import { formatINR, today } from '@/utils/format';
 import type { Room } from '@/types/api';
 import type { TenantForm } from './schemas';
 
@@ -64,6 +64,7 @@ export function RentFields({ showMoveIn = true }: { showMoveIn?: boolean }) {
   const { control, setValue } = useFormContext<TenantForm>();
   const mode = useWatch({ control, name: 'electricityMode' });
   const joiningDate = useWatch({ control, name: 'joiningDate' });
+  const depositReceived = useWatch({ control, name: 'depositReceived' });
   return (
     <View className="gap-4">
       {showMoveIn ? (
@@ -72,7 +73,19 @@ export function RentFields({ showMoveIn = true }: { showMoveIn?: boolean }) {
         )} />
       ) : null}
       <MoneyField control={control} name="agreedRent" label="Monthly Rent" />
-      <MoneyField control={control} name="securityDeposit" label="Security Deposit" hint="Optional" />
+      <MoneyField control={control} name="securityDeposit" label="Agreed Security Deposit" hint="Optional" />
+      <MoneyField control={control} name="depositReceived" label="Deposit Received" hint="Optional. Amount already received" />
+      {depositReceived && Number(depositReceived) > 0 ? (
+        <Controller control={control} name="depositReceivedOn" render={({ field, fieldState }) => (
+          <DateField label="Received On" value={field.value || today()} onChange={field.onChange} maximumDate={new Date()} error={fieldState.error?.message} />
+        )} />
+      ) : null}
+      <Controller control={control} name="agreementStartDate" render={({ field, fieldState }) => (
+        <DateField label="Agreement Start Date (optional)" value={field.value || undefined} onChange={field.onChange} error={fieldState.error?.message} />
+      )} />
+      <Controller control={control} name="agreementEndDate" render={({ field, fieldState }) => (
+        <DateField label="Agreement End Date (optional)" value={field.value || undefined} onChange={field.onChange} error={fieldState.error?.message} />
+      )} />
       <View className="gap-1.5">
         <Text variant="label" tone="soft">Electricity</Text>
         <SegmentedControl value={mode} onChange={(v) => setValue('electricityMode', v)} options={[{ value: 'METER', label: 'Meter' }, { value: 'FIXED', label: 'Fixed' }, { value: 'NONE', label: 'None' }]} />
