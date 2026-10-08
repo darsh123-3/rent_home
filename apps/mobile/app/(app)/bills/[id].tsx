@@ -10,11 +10,19 @@ import { BillStatusBadge } from '@/features/bills/BillCard';
 import { METHOD_LABEL } from '@/features/payments/constants';
 import { AgreementBadge } from '@/features/tenants/AgreementBadge';
 import { formatDate, formatINR, formatMonth } from '@/utils/format';
-import type { BillItemRow } from '@/types/api';
+import type { BillDetail, BillItemRow } from '@/types/api';
 
 function itemLabel(i: BillItemRow) {
   if (i.type === 'ELECTRICITY' && i.meta?.currentReading != null) return `Electricity (${i.meta.units} units × ${formatINR(i.meta.ratePerUnit)})`;
   return i.type === 'CHARGE' && typeof i.meta?.note === 'string' && i.meta.note ? `${i.description} (${i.meta.note})` : i.description;
+}
+
+/** The message sent with a shared bill, e.g. "Rent bill for August 2026, Room 1 (INV-...). Amount due: ₹7,100 by 10 Sep 2026." */
+function billShareText(bill: BillDetail) {
+  const head = `Rent bill for ${formatMonth(bill.billingPeriod)}, Room ${bill.room.roomNumber} (${bill.billNumber}).`;
+  if (bill.balance <= 0) return `${head} Paid in full. Thank you.`;
+  if (bill.carriedInto) return `${head} The balance is included in bill ${bill.carriedInto.billNumber}.`;
+  return `${head} Amount due: ${formatINR(bill.balance)} by ${formatDate(bill.dueDate)}.`;
 }
 
 export default function BillDetailScreen() {
@@ -99,7 +107,7 @@ export default function BillDetailScreen() {
       {!cancelled ? (
         <>
           <SectionHeader title={created === '1' ? 'Share this bill' : 'Invoice'} />
-          <BillActions billId={bill.id} billNumber={bill.billNumber} version={`${bill.paidAmount}-${bill.storedStatus}`} />
+          <BillActions billId={bill.id} billNumber={bill.billNumber} version={`${bill.paidAmount}-${bill.storedStatus}`} tenantName={bill.tenant.fullName} shareText={billShareText(bill)} />
         </>
       ) : null}
 

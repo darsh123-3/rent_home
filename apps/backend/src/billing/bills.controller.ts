@@ -43,6 +43,18 @@ export class BillsController {
     });
   }
 
+  /** The bill as a JPEG picture, generated from the same PDF so both always match. */
+  @Get('bills/:id/image')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  async image(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Query('download') download?: string) {
+    const { buffer, fileName } = await this.service.image(u.userId, id);
+    return new StreamableFile(buffer, {
+      type: 'image/jpeg',
+      disposition: `${download === '1' ? 'attachment' : 'inline'}; filename="${fileName}"`,
+      length: buffer.length,
+    });
+  }
+
   @Post('bills/:id/cancel')
   @HttpCode(200)
   @ResponseMessage('Bill cancelled')

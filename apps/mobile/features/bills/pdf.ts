@@ -6,20 +6,29 @@ import { Platform } from 'react-native';
 import { ApiError, authedFetch } from '@/api/client';
 
 const PDF_ERROR = 'The PDF could not be generated. Please check your internet connection and try again.';
+const IMAGE_ERROR = 'The bill image could not be generated. Please check your internet connection and try again.';
 
 export interface BillPdf {
-  /** Browser only: the PDF bytes, kept so sharing can happen synchronously inside a tap. */
+  /** Browser only: the file bytes, kept so sharing can happen synchronously inside a tap. */
   blob?: Blob;
   /** Local file:// uri on devices; blob: url in the browser preview. */
   uri: string;
   fileName: string;
 }
+/** The same bill as a JPEG picture (WhatsApp shows it inline in the chat). */
+export type BillImage = BillPdf;
+
+const isImage = (file: BillPdf) => file.fileName.endsWith('.jpg');
 
 /** Downloads the invoice from the backend (authenticated, auto-refreshing) into the app cache. */
-export async function fetchBillPdf(billId: string, billNumber: string): Promise<BillPdf> {
-  const fileName = `Invoice-${billNumber}.pdf`;
-  const res = await authedFetch(`/bills/${billId}/pdf`);
-  if (!res.ok) throw new ApiError(res.status, res.status === 404 ? 'Bill not found' : PDF_ERROR);
+export const fetchBillPdf = (billId: string, billNumber: string) => fetchBillFile(`/bills/${billId}/pdf`, `Invoice-${billNumber}.pdf`, PDF_ERROR);
+
+/** Downloads the bill as a JPEG picture, rendered by the backend from the same PDF. */
+export const fetchBillImage = (billId: string, billNumber: string): Promise<BillImage> => fetchBillFile(`/bills/${billId}/image`, `Bill-${billNumber}.jpg`, IMAGE_ERROR);
+
+async function fetchBillFile(path: string, fileName: string, errorMessage: string): Promise<BillPdf> {
+  const res = await authedFetch(path);
+  if (!res.ok) throw new ApiError(res.status, res.status === 404 ? 'Bill not found' : errorMessage);
 
   if (Platform.OS === 'web') {
     const blob = await res.blob();
@@ -45,25 +54,26 @@ export async function viewPdf(pdf: BillPdf) {
   }
 }
 
-/** Native share sheet: WhatsApp, Email, Telegram, Files, Nearby Share... whatever is installed. */
-export async function sharePdf(pdf: BillPdf) {
+/** Native share sheet for the PDF or the JPG picture: WhatsApp, Email, Telegram, Files, Nearby Share... whatever is installed. */
+export async function shareBillFile(file: BillPdf | BillImage, dialogTitle = 'Share bill', text?: string) {
+  const mimeType = isImage(file) ? 'image/jpeg' : 'application/pdf';
   if (Platform.OS === 'web') {
     const nav = navigator as Navigator & { canShare?: (d: unknown) => boolean };
-    const file = new globalThis.File([pdf.blob!], pdf.fileName, { type: 'application/pdf' });
-    if (nav.canShare?.({ files: [file] })) return nav.share({ files: [file], title: pdf.fileName });
-    await saveToDevice(pdf); // desktop browsers have no share sheet for files: download instead
+    const shared = new globalThis.File([file.blob!], file.fileName, { type: mimeType });
+    if (nav.canShare?.({ files: [shared] })) return nav.share({ files: [shared], title: file.fileName, ...(text ? { text } : {}) });
+    await saveToDevice(file); // desktop browsers have no share sheet for files: download instead
     return;
   }
   if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing is not available on this device.');
-  await Sharing.shareAsync(pdf.uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf', dialogTitle: 'Share invoice' });
+  await Sharing.shareAsync(file.uri, { mimeType, UTI: isImage(file) ? 'public.jpeg' : 'com.adobe.pdf', dialogTitle });
 }
 
 /** Saves a copy where the user chooses (Downloads, Drive, ...). Returns false if they cancelled. */
-export async function saveToDevice(pdf: BillPdf): Promise<boolean> {
+export async function saveToDevice(file: BillPdf): Promise<boolean> {
   if (Platform.OS === 'web') {
     const a = document.createElement('a');
-    a.href = pdf.uri;
-    a.download = pdf.fileName;
+    a.href = file.uri;
+    a.download = file.fileName;
     a.click();
     return true;
   }
@@ -73,8 +83,8 @@ export async function saveToDevice(pdf: BillPdf): Promise<boolean> {
   } catch {
     return false; // picker dismissed
   }
-  const source = new File(pdf.uri);
-  const target = dir.createFile(pdf.fileName.replace(/\.pdf$/i, ''), 'application/pdf');
+  const source = new File(file.uri);
+  const target = dir.createFile(file.fileName.replace(/\.(pdf|jpg)$/i, ''), isImage(file) ? 'image/jpeg' : 'application/pdf');
   target.write(new Uint8Array(await source.bytes()));
   return true;
 }
