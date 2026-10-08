@@ -20,6 +20,9 @@ type Tone = 'neutral' | 'danger' | 'warning' | 'success';
 const TEXT_TONE = { neutral: 'ink', danger: 'danger', warning: 'warning', success: 'success' } as const;
 const ICON_TONE: Record<Tone, IconTone> = { neutral: 'primary', danger: 'danger', warning: 'warning', success: 'success' };
 const BG: Record<Tone, string> = { neutral: 'bg-primary-soft', danger: 'bg-danger-soft', warning: 'bg-warning-soft', success: 'bg-success-soft' };
+/** "Ramesh (Room 4), Sita (Room 2) +3 more": who still needs a bill. */
+const toBillNames = (ts: { tenantName: string; roomNumber: string }[]) =>
+  ts.slice(0, 3).map((t) => `${t.tenantName} (Room ${t.roomNumber})`).join(', ') + (ts.length > 3 ? ` +${ts.length - 3} more` : '');
 const people = (n: number) => `${n} ${n === 1 ? 'tenant' : 'tenants'}`;
 
 /** One headline number with a short explanation underneath. */
@@ -67,11 +70,11 @@ export default function HomeScreen() {
         </Pressable>
 
         {k && k.toBill.count > 0 ? (
-          <Pressable onPress={() => router.push('/bills/new')} accessibilityRole="button" className="mt-3 flex-row items-center gap-3 rounded-lg border border-warning-soft bg-warning-soft p-4 active:opacity-80">
+          <Pressable onPress={() => router.push(k.toBill.count === 1 ? { pathname: '/bills/new', params: { tenantId: k.toBill.tenants[0].tenantId } } : '/bills/new')} accessibilityRole="button" className="mt-3 flex-row items-center gap-3 rounded-lg border border-warning-soft bg-warning-soft p-4 active:opacity-80">
             <View className="h-10 w-10 items-center justify-center rounded-full bg-white"><Icon icon={FilePlus2} tone="warning" /></View>
             <View className="flex-1">
               <Text variant="bodyMedium" tone="warning" className="font-semibold">{k.toBill.count} {k.toBill.count === 1 ? 'tenant has' : 'tenants have'} no {k.toBill.monthLabel} bill yet</Text>
-              <Text variant="secondary" tone="warning">Tap to generate bills</Text>
+              <Text variant="secondary" tone="warning">{toBillNames(k.toBill.tenants)} · Tap to generate {k.toBill.count === 1 ? 'the bill' : 'bills'}</Text>
             </View>
             <Icon icon={ChevronRight} size="sm" tone="warning" />
           </Pressable>

@@ -191,13 +191,17 @@ export class ReportsService {
         take: 5,
         select: { id: true, amount: true, paymentDate: true, method: true, billId: true, tenant: { select: { id: true, fullName: true } }, bill: { select: { room: { select: { roomNumber: true } } } } },
       }),
-      this.prisma.roomAssignment.count({ where: { status: 'ACTIVE', ...inProperty, bills: { none: { billingPeriod: bounds(thisMonth).start, status: { notIn: ['CANCELLED'] } } } } }),
+      this.prisma.roomAssignment.findMany({
+        where: { status: 'ACTIVE', ...inProperty, bills: { none: { billingPeriod: bounds(thisMonth).start, status: { notIn: ['CANCELLED'] } } } },
+        orderBy: { room: { roomNumber: 'asc' } },
+        select: { tenant: { select: { id: true, fullName: true } }, room: { select: { roomNumber: true } } },
+      }),
     ]);
     return {
       rentRoll: { monthly: num(rentRoll._sum.agreedRent), tenants: rentRoll._count },
       last7Days: { amount: num(lastWeek._sum.amount), count: lastWeek._count },
       recentPayments: recent.map((p) => ({ id: p.id, amount: num(p.amount), paymentDate: p.paymentDate, method: p.method, billId: p.billId, tenantId: p.tenant.id, tenantName: p.tenant.fullName, roomNumber: p.bill.room.roomNumber })),
-      toBill: { month: thisMonth, monthLabel: monthLabel(bounds(thisMonth).start), count: toBill },
+      toBill: { month: thisMonth, monthLabel: monthLabel(bounds(thisMonth).start), count: toBill.length, tenants: toBill.map((a) => ({ tenantId: a.tenant.id, tenantName: a.tenant.fullName, roomNumber: a.room.roomNumber })) },
     };
   }
 

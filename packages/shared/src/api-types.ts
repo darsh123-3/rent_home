@@ -320,7 +320,8 @@ export interface DashboardKpis {
   vacancy: { rooms: number; lostRent: number; rentableOccupancyPercent: number };
   last7Days: { amount: number; count: number };
   /** Active tenants with no bill yet for the current calendar month. */
-  toBill: { month: string; monthLabel: string; count: number };
+  /** Active tenants with no bill yet for `month`. */
+  toBill: { month: string; monthLabel: string; count: number; tenants: { tenantId: string; tenantName: string; roomNumber: string }[] };
 }
 
 export interface RecentPayment {
