@@ -4,13 +4,13 @@ import { Plus, Receipt, X, Zap } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { api, ApiError, friendlyError } from '@/api/client';
-import { Button, Card, DateField, DetailRow, EmptyState, Header, Icon, Input, MonthStepper, Screen, Select, SectionHeader, Skeleton, Text } from '@/components/ui';
-import { BillRequest, useBillPreview, useCreateBill } from '@/features/bills/api';
+import { Button, Card, DateField, DetailRow, EmptyState, ErrorState, Header, Icon, Input, MonthStepper, Screen, Select, SectionHeader, Skeleton, Text } from '@/components/ui';
+import { BillRequest, useBill, useBillPreview, useCreateBill, useReviseBill } from '@/features/bills/api';
 import { useChangeElectricity } from '@/features/tenants/api';
 import { ChargeRow, ChargeSheet } from '@/features/bills/ChargeSheet';
 import { useProperty } from '@/features/properties/PropertyProvider';
 import { useDebounced } from '@/hooks/useDebounced';
-import { CHARGE_LABELS, isMonthlyCharge, MONTHLY_CHARGE_TYPES, type MonthlyChargeType, type Paginated, type TenantListItem } from '@/types/api';
+import { CHARGE_LABELS, isMonthlyCharge, MONTHLY_CHARGE_TYPES, type BillDetail, type BillPreview, type ChargeType, type MonthlyChargeType, type Paginated, type TenantListItem } from '@/types/api';
 import { formatDate, formatINR, formatYM, toYM } from '@/utils/format';
 
 /** One editable line per monthly category; blank or 0 leaves it off this bill. */
@@ -19,11 +19,49 @@ const emptyMonthly = (): Record<MonthlyChargeType, MonthlyRow> => ({ WATER: { am
 
 const num = (s: string) => (s.trim() !== '' && /^\d+(\.\d{1,2})?$/.test(s.trim()) ? Number(s) : undefined);
 
+/** /bills/new, or /bills/new?edit=<billId> to edit a bill (saving replaces it with a corrected bill for the same month). */
 export default function GenerateBillScreen() {
+  const params = useLocalSearchParams<{ tenantId?: string; edit?: string }>();
+  const editing = useBill(params.edit);
+  if (!params.edit) return <GenerateBillForm />;
+  if (editing.isLoading) return <Screen><Header title="Edit Bill" /><Skeleton height={120} radius={16} /></Screen>;
+  if (editing.isError || !editing.data) return <Screen><Header title="Edit Bill" /><ErrorState error={editing.error} onRetry={editing.refetch} /></Screen>;
+  const bill = editing.data;
+  const blocked = bill.status === 'CANCELLED' ? 'This bill is cancelled.'
+    : bill.paidAmount > 0 ? 'This bill already has payments, so it cannot be edited. Put any correction on the next bill as an extra charge or a discount.'
+      : bill.carriedInto ? `This bill's balance is already part of ${bill.carriedInto.billNumber}. Edit that bill instead.` : null;
+  if (blocked) return <Screen><Header title="Edit Bill" subtitle={bill.billNumber} /><View className="rounded-md bg-warning-soft p-3"><Text variant="secondary" tone="warning">{blocked}</Text></View></Screen>;
+  return <GenerateBillForm key={bill.id} editing={bill} />;
+}
+
+/** The Generate Bill form filled from an existing bill, for editing it. `preview` is the server's preview of the edit. */
+function billToForm(bill: BillDetail, preview: BillPreview) {
+  const el = bill.items.find((i) => i.type === 'ELECTRICITY');
+  const m = (el?.meta ?? {}) as Record<string, unknown>;
+  const metered = typeof m.currentReading === 'number';
+  const monthly = emptyMonthly();
+  const charges: ChargeRow[] = [];
+  for (const i of bill.items.filter((x) => x.type === 'CHARGE')) {
+    const type = (typeof i.meta?.chargeType === 'string' ? i.meta.chargeType : 'OTHER') as ChargeType;
+    if (isMonthlyCharge(type) && !monthly[type].amount) monthly[type] = { amount: String(i.amount), name: i.description, note: typeof i.meta?.note === 'string' ? i.meta.note : '' };
+    else charges.push({ type, name: i.description, amount: String(i.amount) });
+  }
+  const rate = metered && typeof m.ratePerUnit === 'number' && m.ratePerUnit !== preview.electricity.defaultRatePerUnit ? String(m.ratePerUnit) : '';
+  const prev = metered && typeof m.previousReading === 'number' && m.previousReading !== preview.electricity.previousReading ? String(m.previousReading) : '';
+  // An amount typed by hand (faulty meter, imported record, changed fixed amount) stays a manual amount.
+  const manual = !!el && m.isOverride === true && (!metered || m.calculatedAmount !== el.amount);
+  return {
+    reading: metered ? String(m.currentReading) : '', prevReading: prev, rate, manual, manualAmount: manual && el ? String(el.amount) : '',
+    monthly, charges, lateFee: bill.lateFee > 0 ? String(bill.lateFee) : '', discount: bill.discount > 0 ? String(bill.discount) : '', dueDate: bill.dueDate.slice(0, 10),
+  };
+}
+
+function GenerateBillForm({ editing }: { editing?: BillDetail }) {
   const router = useRouter();
   const params = useLocalSearchParams<{ tenantId?: string }>();
+  const fixedTenant = editing?.tenant.id ?? params.tenantId;
   const { current } = useProperty();
-  const [tenantId, setTenantId] = useState<string | undefined>(params.tenantId);
+  const [tenantId, setTenantId] = useState<string | undefined>(fixedTenant);
   const [period, setPeriod] = useState<string | undefined>();
   const [reading, setReading] = useState('');
   const [prevReading, setPrevReading] = useState('');
@@ -39,10 +77,12 @@ export default function GenerateBillScreen() {
   const [chargeSheet, setChargeSheet] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const create = useCreateBill();
+  const revise = useReviseBill(editing?.id ?? '');
+  const saving = editing ? revise.isPending : create.isPending;
 
   const tenantsQuery = useQuery({
     queryKey: ['tenants', 'billable', current?.id],
-    enabled: !params.tenantId && !!current,
+    enabled: !fixedTenant && !!current,
     queryFn: () => api.get<Paginated<TenantListItem>>(`/tenants?propertyId=${current!.id}&status=ACTIVE&pageSize=100`),
   });
 
@@ -52,6 +92,7 @@ export default function GenerateBillScreen() {
       tenantId,
       billingPeriod: period,
       dueDate,
+      ...(editing ? { replacingBillId: editing.id } : {}),
       electricity: {
         ...(manual ? { currentReading: num(reading), overrideAmount: num(manualAmount) ?? 0 } : { currentReading: num(reading) }),
         ...(prevReading.trim() !== '' && num(prevReading) !== undefined ? { previousReading: num(prevReading) } : {}),
@@ -64,7 +105,7 @@ export default function GenerateBillScreen() {
       lateFee: num(lateFee),
       discount: num(discount),
     };
-  }, [tenantId, period, dueDate, manual, reading, prevReading, rate, manualAmount, monthly, charges, lateFee, discount]);
+  }, [tenantId, period, dueDate, editing, manual, reading, prevReading, rate, manualAmount, monthly, charges, lateFee, discount]);
 
   const debounced = useDebounced(request, 400);
   const preview = useBillPreview(debounced);
@@ -76,26 +117,40 @@ export default function GenerateBillScreen() {
   if (data && !seeded) {
     setSeeded(true);
     setPeriod(toYM(data.billingPeriod));
-    // Recurring Water / Housekeeping / MNGL / WiFi fill their own row (first one of each); anything else is an other charge.
-    const seed = emptyMonthly();
-    const others: ChargeRow[] = [];
-    for (const c of data.recurringCharges) {
-      if (isMonthlyCharge(c.type) && !seed[c.type].amount) seed[c.type] = { amount: String(c.amount), name: c.name, note: '' };
-      else others.push({ type: c.type, name: c.name, amount: String(c.amount) });
+    if (editing) {
+      // Editing: start from what the bill says.
+      const f = billToForm(editing, data);
+      setReading(f.reading); setPrevReading(f.prevReading); setRate(f.rate); setManual(f.manual); setManualAmount(f.manualAmount);
+      setMonthly(f.monthly); setCharges(f.charges); setLateFee(f.lateFee); setDiscount(f.discount); setDueDate(f.dueDate);
+    } else {
+      // Recurring Water / Housekeeping / MNGL / WiFi fill their own row (first one of each); anything else is an other charge.
+      const seed = emptyMonthly();
+      const others: ChargeRow[] = [];
+      for (const c of data.recurringCharges) {
+        if (isMonthlyCharge(c.type) && !seed[c.type].amount) seed[c.type] = { amount: String(c.amount), name: c.name, note: '' };
+        else others.push({ type: c.type, name: c.name, amount: String(c.amount) });
+      }
+      setMonthly(seed);
+      setCharges(others);
     }
-    setMonthly(seed);
-    setCharges(others);
   }
 
   const el = data?.electricity;
   const previewError = preview.error ? (preview.error instanceof ApiError ? preview.error.message : friendlyError(preview.error)) : null;
   const needsReading = el?.mode === 'METER' && !manual && (el?.needsReading ?? true);
-  const canGenerate = !!data && !previewError && !settling && !needsReading && !create.isPending;
+  const canGenerate = !!data && !previewError && !settling && !needsReading && !saving;
 
   const generate = async () => {
     if (!request) return;
     setSubmitError(null);
     try {
+      if (editing) {
+        const { replacingBillId: _skip, ...body } = request;
+        void _skip;
+        const bill = await revise.mutateAsync(body);
+        router.replace({ pathname: '/bills/[id]', params: { id: bill.id, edited: '1' } });
+        return;
+      }
       const bill = await create.mutateAsync({ ...request, billingPeriod: period });
       router.replace({ pathname: '/bills/[id]', params: { id: bill.id, created: '1' } });
     } catch (e) {
@@ -118,11 +173,11 @@ export default function GenerateBillScreen() {
             </View>
           ) : null}
           {submitError ? <Text tone="danger" variant="secondary">{submitError}</Text> : null}
-          <Button label={create.isPending ? 'Generating bill...' : 'Generate Bill'} icon={Receipt} onPress={generate} disabled={!canGenerate} loading={create.isPending} />
+          <Button label={editing ? (saving ? 'Saving changes...' : 'Save Changes') : saving ? 'Generating bill...' : 'Generate Bill'} icon={Receipt} onPress={generate} disabled={!canGenerate} loading={saving} />
         </View>
       }
     >
-      <Header title="Generate Bill" subtitle={current?.name} />
+      <Header title={editing ? 'Edit Bill' : 'Generate Bill'} subtitle={editing ? editing.billNumber : current?.name} />
 
       {!tenantId ? (
         tenantsQuery.isLoading ? <Skeleton height={48} radius={12} /> : tenantOptions.length === 0 ? (
@@ -137,10 +192,12 @@ export default function GenerateBillScreen() {
               <Text variant="heading">{data?.tenant.fullName ?? ' '}</Text>
               <Text variant="secondary" tone="soft">{data ? `Room ${data.room.roomNumber}` : ' '}</Text>
             </View>
-            {!params.tenantId ? <Pressable onPress={() => { setTenantId(undefined); setSeeded(false); setPeriod(undefined); setMonthly(emptyMonthly()); setCharges([]); setReading(''); setPrevReading(''); }} accessibilityRole="button"><Text variant="secondaryMedium" tone="primary">Change</Text></Pressable> : null}
+            {!fixedTenant ? <Pressable onPress={() => { setTenantId(undefined); setSeeded(false); setPeriod(undefined); setMonthly(emptyMonthly()); setCharges([]); setReading(''); setPrevReading(''); }} accessibilityRole="button"><Text variant="secondaryMedium" tone="primary">Change</Text></Pressable> : null}
           </Card>
 
-          {period ? <MonthStepper label="Billing Month" value={period} onChange={setPeriod} /> : <Skeleton height={48} radius={12} />}
+          {editing ? (
+            <View className="rounded-md bg-warning-soft p-3"><Text variant="secondary" tone="warning">Editing the {formatYM(toYM(editing.billingPeriod))} bill. Saving creates a corrected bill with a new number and cancels {editing.billNumber}. The month cannot be changed.</Text></View>
+          ) : period ? <MonthStepper label="Billing Month" value={period} onChange={setPeriod} /> : <Skeleton height={48} radius={12} />}
 
           {previewError ? (
             <View className="rounded-md bg-danger-soft p-3"><Text variant="secondary" tone="danger">{previewError}</Text></View>
@@ -232,7 +289,7 @@ export default function GenerateBillScreen() {
                 {data.charges.map((c, i) => <DetailRow key={i} label={c.name} value={formatINR(c.amount)} />)}
                 {data.totals.lateFee > 0 ? <DetailRow label="Late fee" value={formatINR(data.totals.lateFee)} /> : null}
                 {data.totals.discount > 0 ? <DetailRow label="Discount" value={`-${formatINR(data.totals.discount)}`} tone="success" /> : null}
-                {data.totals.previousBalance > 0 ? <DetailRow label={`${data.openingBalance > 0 && data.carriedBills.length === 0 ? 'Outstanding (from before)' : 'Previous balance'}${data.carriedBills.length ? ` (${data.carriedBills.length} bill${data.carriedBills.length > 1 ? 's' : ''})` : ''}`} value={formatINR(data.totals.previousBalance)} tone="danger" /> : null}
+                {data.totals.previousBalance > 0 ? <DetailRow label={`${data.openingBalance > 0 && data.carriedBills.length === 0 ? 'Outstanding (from before)' : 'Previous balance'}${data.carriedBills.length ? ` (not paid: ${data.carriedBills.map((c) => formatYM(toYM(c.billingPeriod))).join(', ')})` : ''}`} value={formatINR(data.totals.previousBalance)} tone="danger" /> : null}
                 <DetailRow label="Total" value={formatINR(data.totals.totalDue)} strong last />
               </Card>
               <Text variant="caption" tone="muted" className="text-center">Totals are calculated and verified by the server for {formatYM(period ?? toYM(data.billingPeriod))}. Due {formatDate(dueDate ?? data.dueDate)}.</Text>

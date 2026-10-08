@@ -55,6 +55,13 @@ export class BillsController {
     });
   }
 
+  /** Edits a bill: the old bill is cancelled and a corrected one for the same month is created, in one step. */
+  @Post('bills/:id/revise')
+  @ResponseMessage('Bill updated')
+  revise(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CreateBillDto) {
+    return this.service.revise(u.userId, id, dto);
+  }
+
   @Post('bills/:id/cancel')
   @HttpCode(200)
   @ResponseMessage('Bill cancelled')

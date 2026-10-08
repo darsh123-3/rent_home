@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Banknote, CircleCheck, Link2 } from 'lucide-react-native';
+import { Banknote, CircleCheck, Link2, Pencil } from 'lucide-react-native';
 import { useState } from 'react';
 import { View } from 'react-native';
 import { friendlyError } from '@/api/client';
@@ -9,7 +9,7 @@ import { BillActions } from '@/features/bills/BillActions';
 import { BillStatusBadge } from '@/features/bills/BillCard';
 import { METHOD_LABEL } from '@/features/payments/constants';
 import { AgreementBadge } from '@/features/tenants/AgreementBadge';
-import { formatDate, formatINR, formatMonth } from '@/utils/format';
+import { formatDate, formatINR, formatMonth, formatMonthShort } from '@/utils/format';
 import type { BillDetail, BillItemRow } from '@/types/api';
 
 function itemLabel(i: BillItemRow) {
@@ -27,7 +27,7 @@ function billShareText(bill: BillDetail) {
 
 export default function BillDetailScreen() {
   const router = useRouter();
-  const { id, created, paid } = useLocalSearchParams<{ id: string; created?: string; paid?: string }>();
+  const { id, created, paid, edited } = useLocalSearchParams<{ id: string; created?: string; paid?: string; edited?: string }>();
   const { data: bill, isLoading, isError, error, refetch, isRefetching } = useBill(id);
   const cancel = useCancelBill(id);
   const [confirming, setConfirming] = useState(false);
@@ -50,6 +50,16 @@ export default function BillDetailScreen() {
           <View className="flex-1">
             <Text variant="heading" tone="success">Bill Generated</Text>
             <Text variant="secondary" tone="success">The totals were calculated and verified by the server.</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {edited === '1' ? (
+        <View className="mb-3 flex-row items-center gap-3 rounded-lg bg-success-soft p-4">
+          <Icon icon={CircleCheck} size="lg" tone="success" />
+          <View className="flex-1">
+            <Text variant="heading" tone="success">Bill updated</Text>
+            <Text variant="secondary" tone="success">{bill.notes?.split('\n')[0] ?? 'The corrected bill replaces the old one.'} The old bill is kept as cancelled.</Text>
           </View>
         </View>
       ) : null}
@@ -84,7 +94,10 @@ export default function BillDetailScreen() {
       <Card>
         {bill.items.map((i, idx) => (
           <View key={i.id} className={`min-h-11 flex-row items-center justify-between gap-4 py-2.5 ${idx < bill.items.length - 1 ? 'border-b border-line' : ''}`}>
-            <Text tone={i.type === 'PREVIOUS_BALANCE' ? 'danger' : 'soft'} className="flex-1" variant="secondary">{itemLabel(i)}</Text>
+            <View className="flex-1">
+              <Text tone={i.type === 'PREVIOUS_BALANCE' ? 'danger' : 'soft'} variant="secondary">{itemLabel(i)}</Text>
+              {i.type === 'PREVIOUS_BALANCE' && bill.absorbed.length ? <Text variant="caption" tone="muted">Not paid on {bill.absorbed.map((b) => `${formatMonthShort(b.billingPeriod)} (${b.billNumber})`).join(', ')}</Text> : null}
+            </View>
             <Text variant="bodyMedium" tone={i.amount < 0 ? 'success' : 'ink'}>{i.amount < 0 ? `-${formatINR(-i.amount)}` : formatINR(i.amount)}</Text>
           </View>
         ))}
@@ -141,7 +154,8 @@ export default function BillDetailScreen() {
       {bill.notes ? <Text variant="secondary" tone="soft" className="mt-3">{bill.notes}</Text> : null}
 
       {canCancel ? (
-        <View className="mt-6">
+        <View className="mt-6 gap-3">
+          <Button label="Edit Bill" icon={Pencil} variant="secondary" onPress={() => router.push({ pathname: '/bills/new', params: { edit: bill.id } })} />
           <Button label="Cancel Bill" variant="danger" onPress={() => setConfirming(true)} />
           {actionError ? <Text tone="danger" variant="secondary" className="mt-2">{actionError}</Text> : null}
         </View>
