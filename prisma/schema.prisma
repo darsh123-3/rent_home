@@ -370,9 +370,13 @@ model Payment {
   reference   String?
   notes       String?
   createdAt   DateTime      @default(now()) @map("created_at")
+  /// Set on a reversal row (negative amount): the payment it undoes. Payments are never deleted.
+  reversalOfId String?      @unique @map("reversal_of_id") @db.Uuid
 
-  bill   Bill   @relation(fields: [billId], references: [id])
-  tenant Tenant @relation(fields: [tenantId], references: [id])
+  bill       Bill     @relation(fields: [billId], references: [id])
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  reversalOf Payment? @relation("PaymentReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy Payment? @relation("PaymentReversal")
 
   @@index([billId])
   @@index([tenantId])

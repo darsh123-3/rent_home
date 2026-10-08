@@ -5,6 +5,7 @@ import { monthLabel } from '../billing/bills.service';
 import { chargesByCategory } from '../common/charges';
 import { todayLocal } from '../common/dates';
 import { OUTSTANDING_BILL_WHERE } from '../common/outstanding';
+import { STANDING_PAYMENT_WHERE } from '../common/payment-filters';
 import { PrismaService } from '../common/prisma.service';
 import { PropertiesService } from '../properties/properties.service';
 
@@ -56,8 +57,8 @@ export class ReportsService {
         where: { propertyId: { in: propertyIds }, billingPeriod: start, status: { notIn: ['CANCELLED', 'DRAFT'] } },
         select: { totalDue: true, previousBalance: true, rentAmount: true, electricityAmount: true, otherChargesAmount: true },
       }),
-      this.prisma.payment.aggregate({ where: { bill: { propertyId: { in: propertyIds } }, paymentDate: { gte: start, lte: end } }, _sum: { amount: true }, _count: true }),
-      this.prisma.payment.groupBy({ by: ['method'], where: { bill: { propertyId: { in: propertyIds } }, paymentDate: { gte: start, lte: end } }, _sum: { amount: true }, _count: true }),
+      this.prisma.payment.aggregate({ where: { ...STANDING_PAYMENT_WHERE, bill: { propertyId: { in: propertyIds } }, paymentDate: { gte: start, lte: end } }, _sum: { amount: true }, _count: true }),
+      this.prisma.payment.groupBy({ by: ['method'], where: { ...STANDING_PAYMENT_WHERE, bill: { propertyId: { in: propertyIds } }, paymentDate: { gte: start, lte: end } }, _sum: { amount: true }, _count: true }),
       this.totalOutstanding(propertyIds),
       this.trend(propertyIds, month),
       this.prisma.billItem.findMany({
@@ -102,6 +103,7 @@ export class ReportsService {
         SELECT to_char(p.payment_date, 'YYYY-MM') AS ym, COALESCE(SUM(p.amount), 0) AS amount
           FROM payments p JOIN bills b ON b.id = p.bill_id
          WHERE b.property_id = ANY(${propertyIds}::uuid[]) AND p.payment_date BETWEEN ${from} AND ${to}
+           AND p.reversal_of_id IS NULL AND NOT EXISTS (SELECT 1 FROM payments r WHERE r.reversal_of_id = p.id)
          GROUP BY 1`,
     ]);
     const get = (rows: { ym: string; amount: Prisma.Decimal }[], ym: string) => num(rows.find((r) => r.ym === ym)?.amount);
@@ -181,10 +183,10 @@ export class ReportsService {
     const inProperty = { room: { propertyId: { in: propertyIds } } };
     const [rentRoll, lastWeek, recent, toBill] = await Promise.all([
       this.prisma.roomAssignment.aggregate({ where: { status: 'ACTIVE', ...inProperty }, _sum: { agreedRent: true }, _count: true }),
-      this.prisma.payment.aggregate({ where: { bill: { propertyId: { in: propertyIds } }, paymentDate: { gte: week, lte: today } }, _sum: { amount: true }, _count: true }),
+      this.prisma.payment.aggregate({ where: { ...STANDING_PAYMENT_WHERE, bill: { propertyId: { in: propertyIds } }, paymentDate: { gte: week, lte: today } }, _sum: { amount: true }, _count: true }),
       this.prisma.payment.findMany({
         relationLoadStrategy: 'join',
-        where: { bill: { propertyId: { in: propertyIds } } },
+        where: { ...STANDING_PAYMENT_WHERE, bill: { propertyId: { in: propertyIds } } },
         orderBy: [{ paymentDate: 'desc' }, { createdAt: 'desc' }],
         take: 5,
         select: { id: true, amount: true, paymentDate: true, method: true, billId: true, tenant: { select: { id: true, fullName: true } }, bill: { select: { room: { select: { roomNumber: true } } } } },

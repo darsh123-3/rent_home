@@ -9,12 +9,17 @@ import { BillActions } from '@/features/bills/BillActions';
 import { BillStatusBadge } from '@/features/bills/BillCard';
 import { AgreementBadge } from '@/features/tenants/AgreementBadge';
 import { METHOD_LABEL } from '@/features/payments/constants';
+import { ReversePaymentModal } from '@/features/payments/ReversePaymentModal';
 import { formatDate, formatINR, formatMonth, formatMonthShort } from '@/utils/format';
-import type { BillDetail, BillItemRow } from '@rental/shared';
+import type { BillDetail, BillItemRow, PaymentRow } from '@rental/shared';
 
-const itemLabel = (i: BillItemRow) =>
-  i.type === 'ELECTRICITY' && i.meta?.currentReading != null ? `Electricity (${i.meta.units} units × ${formatINR(i.meta.ratePerUnit)})`
-    : i.type === 'CHARGE' && typeof i.meta?.note === 'string' && i.meta.note ? `${i.description} (${i.meta.note})` : i.description;
+function itemLabel(i: BillItemRow) {
+  const note = typeof i.meta?.note === 'string' && i.meta.note ? ` (${i.meta.note})` : '';
+  if (i.type === 'RENT' && typeof i.meta?.standardRent === 'number') return `Rent (set for this bill; usual ${formatINR(i.meta.standardRent)})`;
+  if (i.type === 'PREVIOUS_BALANCE' && i.meta?.adjustment) return `Previous balance adjustment${note}`;
+  if (i.type === 'ELECTRICITY' && i.meta?.currentReading != null) return `Electricity (${i.meta.units} units × ${formatINR(i.meta.ratePerUnit)})`;
+  return i.type === 'CHARGE' ? `${i.description}${note}` : i.description;
+}
 
 /** The message sent with a shared bill, e.g. "Rent bill for August 2026, Room 1 (INV-...). Amount due: ₹7,100 by 10 Sep 2026." */
 const billShareText = (bill: BillDetail) => {
@@ -43,6 +48,7 @@ export function BillDetailPage() {
   const cancel = useCancelBill(id);
   const del = useDeleteBill(id);
   const [confirming, setConfirming] = useState(false);
+  const [reversing, setReversing] = useState<PaymentRow | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -51,6 +57,10 @@ export function BillDetailPage() {
 
   const cancelled = bill.status === 'CANCELLED';
   const canCancel = !cancelled && bill.paidAmount === 0 && !bill.carriedInto;
+  // Paid bills can be edited too: their payments move to the corrected bill.
+  const canEdit = !cancelled && !bill.carriedInto;
+  // A payment can be undone until the bill's balance has been carried into a later bill.
+  const canReverse = !cancelled && !bill.carriedInto;
   const canPay = !cancelled && !bill.carriedInto && bill.balance > 0;
 
   return (
@@ -78,7 +88,7 @@ export function BillDetailPage() {
           <div key={i.id} className={`flex min-h-11 items-center justify-between gap-4 py-2.5 ${idx < bill.items.length - 1 ? 'border-b border-line' : ''}`}>
             <span className={`flex-1 text-small ${i.type === 'PREVIOUS_BALANCE' ? 'text-danger' : 'text-ink-soft'}`}>
               {itemLabel(i)}
-              {i.type === 'PREVIOUS_BALANCE' && bill.absorbed.length ? <span className="block text-caption text-ink-muted">Not paid on {bill.absorbed.map((b) => `${formatMonthShort(b.billingPeriod)} (${b.billNumber})`).join(', ')}</span> : null}
+              {i.type === 'PREVIOUS_BALANCE' && !i.meta?.adjustment && bill.absorbed.length ? <span className="block text-caption text-ink-muted">Not paid on {bill.absorbed.map((b) => `${formatMonthShort(b.billingPeriod)} (${b.billNumber})`).join(', ')}</span> : null}
             </span>
             <span className={`font-medium ${i.amount < 0 ? 'text-success' : ''}`}>{i.amount < 0 ? `-${formatINR(-i.amount)}` : formatINR(i.amount)}</span>
           </div>
@@ -107,9 +117,16 @@ export function BillDetailPage() {
           <SectionHeader title="Payments" />
           <Card padded={false} className="overflow-hidden">
             {bill.payments.map((p, i) => (
-              <div key={p.id} className={`flex items-center justify-between px-4 py-3 ${i < bill.payments.length - 1 ? 'border-b border-line' : ''}`}>
-                <div className="pr-3"><div className="font-medium">{METHOD_LABEL[p.method]}</div><div className="text-small text-ink-soft">Received {formatDate(p.paymentDate)}{p.reference ? ` · ${p.reference}` : ''}</div></div>
-                <span className="text-heading text-success">{formatINR(p.amount)}</span>
+              <div key={p.id} className={`flex items-center justify-between gap-3 px-4 py-3 ${i < bill.payments.length - 1 ? 'border-b border-line' : ''}`}>
+                <div className="min-w-0 pr-3">
+                  <div className={`font-medium ${p.reversed ? 'text-ink-muted line-through' : ''}`}>{METHOD_LABEL[p.method]}</div>
+                  <div className="text-small text-ink-soft">Received {formatDate(p.paymentDate)}{p.reference ? ` · ${p.reference}` : ''}</div>
+                  {p.reversed ? <div className="text-small text-danger">Reversed{p.reversed.reason ? `: ${p.reversed.reason}` : ''}</div> : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <span className={`text-heading ${p.reversed ? 'text-ink-muted line-through' : 'text-success'}`}>{formatINR(p.amount)}</span>
+                  {canReverse && !p.reversed ? <button type="button" onClick={() => setReversing(p)} className="text-small font-medium text-danger">Reverse</button> : null}
+                </div>
               </div>
             ))}
           </Card>
@@ -120,9 +137,11 @@ export function BillDetailPage() {
       {bill.absorbed.length ? <div className="mt-3 flex items-center gap-2 text-small text-ink-muted"><Icon icon={Link2} size={16} tone="muted" />Includes unpaid balance from {bill.absorbed.map((b) => b.billNumber).join(', ')}</div> : null}
       {bill.notes ? <p className="mt-3 text-small text-ink-soft">{bill.notes}</p> : null}
 
+      {canEdit ? <div className="mt-6"><LinkButton to={`/bills/${bill.id}/edit`} icon={Pencil} variant="secondary">Edit Bill</LinkButton></div> : null}
+      {reversing ? <ReversePaymentModal payment={reversing} onClose={() => setReversing(null)} /> : null}
+
       {canCancel ? (
         <div className="mt-6 space-y-2">
-          <LinkButton to={`/bills/${bill.id}/edit`} icon={Pencil} variant="secondary">Edit Bill</LinkButton>
           <Button variant="danger" onClick={() => setConfirming(true)}>Cancel Bill</Button>
           {actionError ? <Notice tone="danger">{actionError}</Notice> : null}
         </div>

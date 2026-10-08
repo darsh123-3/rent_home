@@ -16,8 +16,8 @@ export function PaymentRow({ payment, showTenant = true, onPress }: { payment: P
         </Text>
       </View>
       <View className="items-end">
-        <Text variant="heading" tone="success">{formatINR(payment.amount)}</Text>
-        <Text variant="caption" tone="muted">Received {formatShortDate(payment.paymentDate)}</Text>
+        <Text variant="heading" tone={payment.reversed ? 'muted' : 'success'} className={payment.reversed ? 'line-through' : undefined}>{formatINR(payment.amount)}</Text>
+        <Text variant="caption" tone={payment.reversed ? 'danger' : 'muted'}>{payment.reversed ? 'Reversed' : `Received ${formatShortDate(payment.paymentDate)}`}</Text>
       </View>
     </Card>
   );

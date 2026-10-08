@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { BillStatus, ChargeType } from '@prisma/client';
-import { ArrayMaxSize, IsArray, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Matches, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Matches, MaxLength, Min, ValidateNested } from 'class-validator';
 import { PaginationQuery } from '../common/pagination';
 
 const money = { maxDecimalPlaces: 2 } as const;
@@ -33,6 +33,13 @@ export class PreviewBillDto {
   @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Due date must be in YYYY-MM-DD format' }) dueDate?: string;
   @IsOptional() @ValidateNested() @Type(() => ElectricityDto) electricity?: ElectricityDto;
   @IsOptional() @IsArray() @ArrayMaxSize(20) @ValidateNested({ each: true }) @Type(() => BillChargeDto) charges?: BillChargeDto[];
+  /** Rent for this bill instead of the tenant's current rent. */
+  @IsOptional() @Type(() => Number) @IsNumber(money, { message: 'Rent must have at most 2 decimals' }) @Min(0, { message: 'Rent cannot be negative' }) rent?: number;
+  /** With `rent`: also make it the tenant's monthly rent from this billing month onward. */
+  @IsOptional() @IsBoolean() applyRentFromThisMonth?: boolean;
+  /** Raises (+) or lowers (-) the carried previous balance on this bill, e.g. old dues not in the app. Shown as its own line. */
+  @IsOptional() @Type(() => Number) @IsNumber(money, { message: 'Adjustment must have at most 2 decimals' }) previousBalanceAdjustment?: number;
+  @IsOptional() @IsString() @MaxLength(100) previousBalanceNote?: string;
   @IsOptional() @Type(() => Number) @IsNumber(money) @Min(0) lateFee?: number;
   @IsOptional() @Type(() => Number) @IsNumber(money) @Min(0) discount?: number;
   @IsOptional() @IsString() @MaxLength(500) notes?: string;

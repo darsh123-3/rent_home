@@ -70,13 +70,38 @@ describe('Editing a bill (e2e)', () => {
     sepId = fixed.id;
   });
 
-  it('refuses edits once a payment is recorded, for cancelled bills, and for other owners', async () => {
+  it('refuses edits for cancelled bills and for other owners', async () => {
     const old = await prisma.bill.findFirstOrThrow({ where: { billNumber: 'SUN-202609-0002' } });
     expect((await owner.post(`/bills/${old.id}/revise`, {}).expect(409)).body.message).toBe('A cancelled bill cannot be edited');
     await other.post(`/bills/${sepId}/revise`, { electricity: { currentReading: 230 } }).expect(404);
-    await owner.post(`/bills/${sepId}/payments`, { amount: 1000, paymentDate: '2026-10-12', method: 'CASH' }).expect(201);
-    const res = await owner.post(`/bills/${sepId}/revise`, { electricity: { currentReading: 230 } }).expect(409);
-    expect(res.body.message).toMatch(/already has payments, so it cannot be edited/);
+  });
+
+  it('edits a paid bill: its payments move to the corrected bill with the same dates, and collections do not change', async () => {
+    const pay = (await owner.post(`/bills/${sepId}/payments`, { amount: 1000, paymentDate: '2026-10-12', method: 'UPI', reference: 'UTR9' }).expect(201)).body.data;
+    const before = (await owner.get(`/reports/collection?propertyId=${pay.bill.property.id}&month=2026-10`)).body.data;
+    const owedBefore = (await owner.get(`/tenants/${tenantId}`)).body.data.outstanding;
+
+    const fixed = (await owner.post(`/bills/${sepId}/revise`, { electricity: { currentReading: 230 }, charges: [{ type: 'WATER', amount: 150 }], discount: 50 }).expect(201)).body.data;
+    expect(fixed).toMatchObject({ paidAmount: 1000, electricityAmount: 800, status: 'OVERDUE', storedStatus: 'PARTIALLY_PAID' });
+    expect(fixed.payments).toEqual([expect.objectContaining({ amount: 1000, paymentDate: expect.stringMatching(/^2026-10-12/), method: 'UPI', reference: 'UTR9', reversed: null })]);
+    expect(fixed.payments[0].notes).toMatch(/^Moved from SUN-202609-0003 \(bill edited\)\./);
+
+    const old = (await owner.get(`/bills/${sepId}`)).body.data;
+    expect(old).toMatchObject({ status: 'CANCELLED', paidAmount: 0 });
+    expect(old.payments).toEqual([expect.objectContaining({ id: pay.payment.id, reversed: expect.objectContaining({ reason: 'moved to the corrected bill (bill edited)' }) })]);
+
+    const after = (await owner.get(`/reports/collection?propertyId=${pay.bill.property.id}&month=2026-10`)).body.data;
+    expect([after.collected, after.paymentCount]).toEqual([before.collected, before.paymentCount]); // the same money, counted once
+    expect((await owner.get(`/tenants/${tenantId}`)).body.data.outstanding).toBe(owedBefore + 100); // only the change itself (10 more units = +₹100) adds to what is owed
+    sepId = fixed.id;
+  });
+
+  it('refuses an edit that would make the bill smaller than what was already paid', async () => {
+    const bill = (await owner.get(`/bills/${sepId}`)).body.data;
+    await owner.post(`/bills/${sepId}/payments`, { amount: bill.balance, paymentDate: '2026-10-13', method: 'CASH' }).expect(201);
+    const res = await owner.post(`/bills/${sepId}/revise`, { electricity: { currentReading: 230 }, discount: 2000 }).expect(400);
+    expect(res.body.message).toMatch(/is less than the ₹[\d,]+ already paid on this bill/);
+    expect((await owner.get(`/bills/${sepId}`)).body.data).toMatchObject({ status: 'PAID', balance: 0 }); // nothing changed
   });
 
   it('only edits the latest bill and still validates the new details', async () => {

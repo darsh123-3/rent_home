@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser, ResponseMessage } from '../common/decorators';
-import { ListPaymentsQuery, RecordPaymentDto, RecordTenantPaymentDto } from './payments.dto';
+import { ListPaymentsQuery, RecordPaymentDto, RecordTenantPaymentDto, ReversePaymentDto } from './payments.dto';
 import { PaymentsService } from './payments.service';
 
 @Controller()
@@ -17,6 +17,14 @@ export class PaymentsController {
   @ResponseMessage('Payment recorded successfully')
   recordForTenant(@CurrentUser() u: AuthUser, @Body() dto: RecordTenantPaymentDto) {
     return this.service.recordForTenant(u.userId, dto);
+  }
+
+  /** Undoes a payment recorded by mistake: adds a reversal entry and the bill's balance comes back. */
+  @Post('payments/:id/reverse')
+  @HttpCode(200)
+  @ResponseMessage('Payment reversed')
+  reverse(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ReversePaymentDto) {
+    return this.service.reverse(u.userId, id, dto.reason);
   }
 
   @Get('payments')
