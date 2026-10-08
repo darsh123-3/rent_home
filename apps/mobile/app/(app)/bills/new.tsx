@@ -234,6 +234,21 @@ function GenerateBillForm({ editing }: { editing?: BillDetail }) {
                 ) : null}
               </Card>
 
+              <Card className="gap-3">
+                <View className="flex-row items-center justify-between gap-3">
+                  <Text variant="heading">Previous due</Text>
+                  <Text variant="bodyMedium" tone={data.carriedBalance > 0 ? 'danger' : 'soft'}>{data.carriedBalance > 0 ? formatINR(data.carriedBalance) : 'Nil'}</Text>
+                </View>
+                <Text variant="secondary" tone="soft">
+                  {data.carriedBalance > 0
+                    ? `Unpaid from earlier bills${data.carriedBills.length ? ` (${data.carriedBills.map((c) => formatYM(toYM(c.billingPeriod))).join(', ')})` : ''}. It is added to this bill automatically.`
+                    : 'Nothing unpaid from earlier bills in the app.'}
+                </Text>
+                <Input label="Add previous due (if any)" prefix="₹" keyboardType="numbers-and-punctuation" placeholder="0" value={adjustment} onChangeText={setAdjustment}
+                  hint="Old dues not in the app, e.g. 2000. Type -500 to reduce." error={adjustment.trim() && signedNum(adjustment) === undefined ? 'Enter an amount like 2000 or -500' : undefined} />
+                {signedNum(adjustment) ? <Input label="Reason" placeholder="e.g. Old dues from the register" maxLength={100} error={adjustmentNote.trim() ? undefined : 'Enter a reason to add this amount'} value={adjustmentNote} onChangeText={setAdjustmentNote} /> : null}
+              </Card>
+
               {el && el.mode !== 'NONE' ? (
                 <Card className="gap-3">
                   <View className="flex-row items-center gap-2"><Icon icon={Zap} tone="primary" /><Text variant="heading">Electricity</Text></View>
@@ -300,9 +315,6 @@ function GenerateBillForm({ editing }: { editing?: BillDetail }) {
               )}
 
               <SectionHeader title="Adjustments" />
-              <Input label="Adjust previous balance" prefix="₹" keyboardType="numbers-and-punctuation" placeholder="0" value={adjustment} onChangeText={setAdjustment}
-                hint={`Unpaid from earlier bills: ${formatINR(data.carriedBalance)}. Type 500 to add, -500 to reduce.`} error={adjustment.trim() && signedNum(adjustment) === undefined ? 'Enter an amount like 500 or -500' : undefined} />
-              {signedNum(adjustment) ? <Input label="Reason for the adjustment" placeholder="e.g. Old dues from the register" maxLength={100} error={adjustmentNote.trim() ? undefined : 'Enter a reason to apply this adjustment'} value={adjustmentNote} onChangeText={setAdjustmentNote} /> : null}
               <View className="flex-row gap-3">
                 <View className="flex-1"><Input label="Late fee" prefix="₹" keyboardType="decimal-pad" placeholder="0" value={lateFee} onChangeText={setLateFee} /></View>
                 <View className="flex-1"><Input label="Discount" prefix="₹" keyboardType="decimal-pad" placeholder="0" value={discount} onChangeText={setDiscount} /></View>
