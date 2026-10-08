@@ -17,8 +17,10 @@ import { formatDate, formatINR, formatYM, toYM } from '@/utils/format';
 interface MonthlyRow { amount: string; name?: string; note: string }
 const emptyMonthly = (): Record<MonthlyChargeType, MonthlyRow> => ({ WATER: { amount: '', note: '' }, CLEANING: { amount: '', note: '' }, MNGL_GAS: { amount: '', note: '' }, INTERNET: { amount: '', note: '' } });
 
-/** Signed amount for the previous balance adjustment: 500 or -500 (at most 2 decimals). */
-const signedNum = (s: string) => (/^-?\d+(\.\d{1,2})?$/.test(s.trim()) && Number(s) !== 0 ? Number(s) : undefined);
+/** A valid previous balance adjustment as typed: 500, -500 or 0 (at most 2 decimals). */
+const isAmount = (s: string) => /^-?\d+(\.\d{1,2})?$/.test(s.trim());
+/** Signed amount for the previous balance adjustment: 500 or -500; 0 means no change. */
+const signedNum = (s: string) => (isAmount(s) && Number(s) !== 0 ? Number(s) : undefined);
 
 const num = (s: string) => (s.trim() !== '' && /^\d+(\.\d{1,2})?$/.test(s.trim()) ? Number(s) : undefined);
 
@@ -245,7 +247,7 @@ function GenerateBillForm({ editing }: { editing?: BillDetail }) {
                     : 'Nothing unpaid from earlier bills in the app.'}
                 </Text>
                 <Input label="Add previous due (if any)" prefix="₹" keyboardType="numbers-and-punctuation" placeholder="0" value={adjustment} onChangeText={setAdjustment}
-                  hint="Old dues not in the app, e.g. 2000." error={adjustment.trim() && signedNum(adjustment) === undefined ? 'Enter an amount like 2000 or -500'
+                  hint="Old dues not in the app, e.g. 2000." error={adjustment.trim() && !isAmount(adjustment) ? 'Enter an amount like 2000 or -500'
                     : data.carriedBalance + (signedNum(adjustment) ?? 0) < 0 ? `Previous due is ${data.carriedBalance > 0 ? formatINR(data.carriedBalance) : 'Nil'}, so it can be reduced by at most that much` : undefined} />
                 {signedNum(adjustment) ? <Input label="Reason (optional)" maxLength={100} autoComplete="off" autoCorrect={false} hint="Printed next to the amount on the bill" value={adjustmentNote} onChangeText={setAdjustmentNote} /> : null}
               </Card>
