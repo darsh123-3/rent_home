@@ -103,8 +103,7 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
       ],
       lateFee: num(lateFee), discount: num(discount),
       ...(rentText !== null && num(rentText) !== undefined ? { rent: num(rentText), applyRentFromThisMonth: rentFromNow } : {}),
-      // Sent only with its reason; until then the reason box asks for one.
-      ...(signedNum(adjustment) && adjustmentNote.trim() ? { previousBalanceAdjustment: signedNum(adjustment), previousBalanceNote: adjustmentNote.trim() } : {}),
+      ...(signedNum(adjustment) ? { previousBalanceAdjustment: signedNum(adjustment), previousBalanceNote: adjustmentNote.trim() || undefined } : {}),
     };
   }, [tenantId, period, dueDate, editing, rentText, rentFromNow, adjustment, adjustmentNote, manual, reading, prevReading, rate, manualAmount, monthly, charges, lateFee, discount]);
 
@@ -236,7 +235,7 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Input label="Add previous due (if any)" prefix="₹" inputMode="text" placeholder="0" value={adjustment} onChange={(e) => setAdjustment(e.target.value)}
                     hint="Old dues not in the app, e.g. 2000. Type -500 to reduce." error={adjustment.trim() && signedNum(adjustment) === undefined ? 'Enter an amount like 2000 or -500' : undefined} />
-                  {signedNum(adjustment) ? <Input label="Reason" placeholder="e.g. Old dues from the register" maxLength={100} error={adjustmentNote.trim() ? undefined : 'Enter a reason to add this amount'} value={adjustmentNote} onChange={(e) => setAdjustmentNote(e.target.value)} /> : null}
+                  {signedNum(adjustment) ? <Input label="Reason (optional)" placeholder="e.g. Old dues from the register" maxLength={100} hint="Printed next to the amount on the bill" value={adjustmentNote} onChange={(e) => setAdjustmentNote(e.target.value)} /> : null}
                 </div>
               </Card>
 

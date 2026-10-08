@@ -93,7 +93,8 @@ describe('Bill corrections: payment reversal, previous balance adjustment, rent 
       const base = (await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-08' }).expect(200)).body.data;
       const carried = base.totals.previousBalance;
       expect(carried).toBeGreaterThan(0);
-      await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-08', previousBalanceAdjustment: 500 }).expect(400); // reason needed
+      // The reason is optional
+      expect((await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-08', previousBalanceAdjustment: 500 }).expect(200)).body.data.totals.previousBalance).toBe(carried + 500);
       await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-08', previousBalanceAdjustment: -(carried + 1), previousBalanceNote: 'x' }).expect(400); // not below zero
       const up = (await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-08', previousBalanceAdjustment: 500, previousBalanceNote: 'Old dues from the register' }).expect(200)).body.data;
       expect(up).toMatchObject({ carriedBalance: carried, previousBalanceAdjustment: 500 });
