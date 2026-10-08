@@ -52,10 +52,11 @@ function billToForm(bill: BillDetail, preview: BillPreview) {
   }
   const rate = metered && typeof m.ratePerUnit === 'number' && m.ratePerUnit !== preview.electricity.defaultRatePerUnit ? String(m.ratePerUnit) : '';
   const prev = metered && typeof m.previousReading === 'number' && m.previousReading !== preview.electricity.previousReading ? String(m.previousReading) : '';
-  // An amount typed by hand (faulty meter, imported record, changed fixed amount) stays a manual amount.
-  const manual = !!el && m.isOverride === true && (!metered || m.calculatedAmount !== el.amount);
+  // An amount typed by hand (faulty meter, imported record, changed fixed amount) stays a manual amount,
+  // and a bill without electricity (an old imported one) keeps none instead of asking for a meter reading.
+  const manual = !el || (m.isOverride === true && (!metered || m.calculatedAmount !== el.amount));
   return {
-    reading: metered ? String(m.currentReading) : '', prevReading: prev, rate, manual, manualAmount: manual && el ? String(el.amount) : '',
+    reading: metered ? String(m.currentReading) : '', prevReading: prev, rate, manual, manualAmount: manual ? String(el?.amount ?? 0) : '',
     monthly, charges, lateFee: bill.lateFee > 0 ? String(bill.lateFee) : '', discount: bill.discount > 0 ? String(bill.discount) : '', dueDate: bill.dueDate.slice(0, 10),
     rent: rentItem && typeof rentItem.meta?.standardRent === 'number' ? String(rentItem.amount) : null,
     adjustment: adjustmentItem ? String(adjustmentItem.amount) : '', adjustmentNote: adjustmentItem && typeof adjustmentItem.meta?.note === 'string' ? adjustmentItem.meta.note : '',
