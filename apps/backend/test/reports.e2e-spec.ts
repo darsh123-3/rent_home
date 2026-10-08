@@ -143,6 +143,7 @@ describe('Dashboard & reports (e2e)', () => {
     expect(d.kpis.trend).toHaveLength(6);
     expect(d.recentPayments[0]).toMatchObject({ tenantName: expect.any(String), roomNumber: expect.any(String) });
     expect(d.kpis.toBill.count).toBeGreaterThanOrEqual(0);
+    expect(d.kpis.toBill.tenants).toHaveLength(d.kpis.toBill.count);
 
     const names = async (qs: string) => ((await owner.get(`/tenants?propertyId=${propertyId}&${qs}`).expect(200)).body.data.items as { fullName: string }[]).map((x) => x.fullName).sort();
     expect(await names('dues=true')).toEqual(['Left Behind', 'Rahul Sharma']);

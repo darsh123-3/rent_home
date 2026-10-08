@@ -37,6 +37,9 @@ function Kpi({ label, value, sub, icon, tone = 'neutral', to }: { label: string;
   );
 }
 
+/** "Ramesh (Room 4), Sita (Room 2) +3 more": who still needs a bill. */
+const toBillNames = (ts: { tenantName: string; roomNumber: string }[]) =>
+  ts.slice(0, 3).map((t) => `${t.tenantName} (Room ${t.roomNumber})`).join(', ') + (ts.length > 3 ? ` +${ts.length - 3} more` : '');
 const people = (n: number) => `${n} ${n === 1 ? 'tenant' : 'tenants'}`;
 
 export function HomePage() {
@@ -80,9 +83,9 @@ export function HomePage() {
   );
 
   const toBill = k && k.toBill.count > 0 && (
-    <Link to="/bills/new" className="mt-3 flex items-center gap-3 rounded-lg border border-warning/30 bg-warning-soft p-4 hover:opacity-90">
+    <Link to={k.toBill.count === 1 ? `/bills/new?tenantId=${k.toBill.tenants[0].tenantId}` : '/bills/new'} className="mt-3 flex items-center gap-3 rounded-lg border border-warning/30 bg-warning-soft p-4 hover:opacity-90">
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white"><Icon icon={FilePlus2} tone="warning" /></span>
-      <span className="min-w-0 flex-1"><span className="block font-semibold text-warning">{k.toBill.count} {k.toBill.count === 1 ? 'tenant has' : 'tenants have'} no {k.toBill.monthLabel} bill yet</span><span className="block text-small text-warning/90">Tap to generate bills</span></span>
+      <span className="min-w-0 flex-1"><span className="block font-semibold text-warning">{k.toBill.count} {k.toBill.count === 1 ? 'tenant has' : 'tenants have'} no {k.toBill.monthLabel} bill yet</span><span className="block text-small text-warning/90">{toBillNames(k.toBill.tenants)} · Tap to generate {k.toBill.count === 1 ? 'the bill' : 'bills'}</span></span>
       <Icon icon={ChevronRight} size={18} tone="warning" />
     </Link>
   );
