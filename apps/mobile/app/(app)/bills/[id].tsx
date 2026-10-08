@@ -1,20 +1,24 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Banknote, CircleCheck, Link2, Pencil } from 'lucide-react-native';
 import { useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { friendlyError } from '@/api/client';
 import { Button, Card, ConfirmDialog, DetailRow, ErrorState, Header, Icon, Screen, SectionHeader, SkeletonList, Text } from '@/components/ui';
 import { useBill, useCancelBill } from '@/features/bills/api';
 import { BillActions } from '@/features/bills/BillActions';
 import { BillStatusBadge } from '@/features/bills/BillCard';
 import { METHOD_LABEL } from '@/features/payments/constants';
+import { ReversePaymentSheet } from '@/features/payments/ReversePaymentSheet';
 import { AgreementBadge } from '@/features/tenants/AgreementBadge';
 import { formatDate, formatINR, formatMonth, formatMonthShort } from '@/utils/format';
-import type { BillDetail, BillItemRow } from '@/types/api';
+import type { BillDetail, BillItemRow, PaymentRow } from '@/types/api';
 
 function itemLabel(i: BillItemRow) {
+  const note = typeof i.meta?.note === 'string' && i.meta.note ? ` (${i.meta.note})` : '';
+  if (i.type === 'RENT' && typeof i.meta?.standardRent === 'number') return `Rent (set for this bill; usual ${formatINR(i.meta.standardRent)})`;
+  if (i.type === 'PREVIOUS_BALANCE' && i.meta?.adjustment) return `Previous balance adjustment${note}`;
   if (i.type === 'ELECTRICITY' && i.meta?.currentReading != null) return `Electricity (${i.meta.units} units × ${formatINR(i.meta.ratePerUnit)})`;
-  return i.type === 'CHARGE' && typeof i.meta?.note === 'string' && i.meta.note ? `${i.description} (${i.meta.note})` : i.description;
+  return i.type === 'CHARGE' ? `${i.description}${note}` : i.description;
 }
 
 /** The message sent with a shared bill, e.g. "Rent bill for August 2026, Room 1 (INV-...). Amount due: ₹7,100 by 10 Sep 2026." */
@@ -31,6 +35,7 @@ export default function BillDetailScreen() {
   const { data: bill, isLoading, isError, error, refetch, isRefetching } = useBill(id);
   const cancel = useCancelBill(id);
   const [confirming, setConfirming] = useState(false);
+  const [reversing, setReversing] = useState<PaymentRow | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   if (isLoading) return <Screen><Header title="Bill" /><SkeletonList count={2} lines={4} /></Screen>;
@@ -38,6 +43,8 @@ export default function BillDetailScreen() {
 
   const cancelled = bill.status === 'CANCELLED';
   const canCancel = !cancelled && bill.paidAmount === 0 && !bill.carriedInto;
+  // Paid bills can be edited too (their payments move to the corrected bill); payments can be undone until the balance is carried on.
+  const canEdit = !cancelled && !bill.carriedInto;
   const canPay = !cancelled && !bill.carriedInto && bill.balance > 0;
 
   return (
@@ -96,7 +103,7 @@ export default function BillDetailScreen() {
           <View key={i.id} className={`min-h-11 flex-row items-center justify-between gap-4 py-2.5 ${idx < bill.items.length - 1 ? 'border-b border-line' : ''}`}>
             <View className="flex-1">
               <Text tone={i.type === 'PREVIOUS_BALANCE' ? 'danger' : 'soft'} variant="secondary">{itemLabel(i)}</Text>
-              {i.type === 'PREVIOUS_BALANCE' && bill.absorbed.length ? <Text variant="caption" tone="muted">Not paid on {bill.absorbed.map((b) => `${formatMonthShort(b.billingPeriod)} (${b.billNumber})`).join(', ')}</Text> : null}
+              {i.type === 'PREVIOUS_BALANCE' && !i.meta?.adjustment && bill.absorbed.length ? <Text variant="caption" tone="muted">Not paid on {bill.absorbed.map((b) => `${formatMonthShort(b.billingPeriod)} (${b.billNumber})`).join(', ')}</Text> : null}
             </View>
             <Text variant="bodyMedium" tone={i.amount < 0 ? 'success' : 'ink'}>{i.amount < 0 ? `-${formatINR(-i.amount)}` : formatINR(i.amount)}</Text>
           </View>
@@ -133,12 +140,16 @@ export default function BillDetailScreen() {
           <SectionHeader title="Payments" />
           <Card padded={false}>
             {bill.payments.map((p, i) => (
-              <View key={p.id} className={`flex-row items-center justify-between px-4 py-3 ${i < bill.payments.length - 1 ? 'border-b border-line' : ''}`}>
+              <View key={p.id} className={`flex-row items-center justify-between gap-3 px-4 py-3 ${i < bill.payments.length - 1 ? 'border-b border-line' : ''}`}>
                 <View className="flex-1 pr-3">
-                  <Text variant="bodyMedium">{METHOD_LABEL[p.method]}</Text>
+                  <Text variant="bodyMedium" tone={p.reversed ? 'muted' : 'ink'} className={p.reversed ? 'line-through' : undefined}>{METHOD_LABEL[p.method]}</Text>
                   <Text variant="secondary" tone="soft">Received {formatDate(p.paymentDate)}{p.reference ? ` · ${p.reference}` : ''}</Text>
+                  {p.reversed ? <Text variant="secondary" tone="danger">Reversed{p.reversed.reason ? `: ${p.reversed.reason}` : ''}</Text> : null}
                 </View>
-                <Text variant="heading" tone="success">{formatINR(p.amount)}</Text>
+                <View className="items-end gap-1">
+                  <Text variant="heading" tone={p.reversed ? 'muted' : 'success'} className={p.reversed ? 'line-through' : undefined}>{formatINR(p.amount)}</Text>
+                  {canEdit && !p.reversed ? <Pressable onPress={() => setReversing(p)} accessibilityRole="button" hitSlop={8}><Text variant="secondaryMedium" tone="danger">Reverse</Text></Pressable> : null}
+                </View>
               </View>
             ))}
           </Card>
@@ -153,9 +164,11 @@ export default function BillDetailScreen() {
       ) : null}
       {bill.notes ? <Text variant="secondary" tone="soft" className="mt-3">{bill.notes}</Text> : null}
 
+      {canEdit ? <View className="mt-6"><Button label="Edit Bill" icon={Pencil} variant="secondary" onPress={() => router.push({ pathname: '/bills/new', params: { edit: bill.id } })} /></View> : null}
+      <ReversePaymentSheet payment={reversing} onClose={() => setReversing(null)} />
+
       {canCancel ? (
-        <View className="mt-6 gap-3">
-          <Button label="Edit Bill" icon={Pencil} variant="secondary" onPress={() => router.push({ pathname: '/bills/new', params: { edit: bill.id } })} />
+        <View className="mt-3 gap-3">
           <Button label="Cancel Bill" variant="danger" onPress={() => setConfirming(true)} />
           {actionError ? <Text tone="danger" variant="secondary" className="mt-2">{actionError}</Text> : null}
         </View>

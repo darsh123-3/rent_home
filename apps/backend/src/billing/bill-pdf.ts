@@ -71,7 +71,7 @@ const METHOD: Record<string, string> = { CASH: 'Cash', UPI: 'UPI', BANK_TRANSFER
 const itemLabel = (i: PdfBill['items'][number]) =>
   i.type === 'ELECTRICITY' && i.meta?.currentReading != null
     ? `Electricity (${i.meta.previousReading} to ${i.meta.currentReading}: ${i.meta.units} units x ${formatINR(i.meta.ratePerUnit)})`
-    : i.type === 'CHARGE' && typeof i.meta?.note === 'string' && i.meta.note
+    : (i.type === 'CHARGE' || (i.type === 'PREVIOUS_BALANCE' && i.meta?.adjustment)) && typeof i.meta?.note === 'string' && i.meta.note
       ? `${i.description} (${i.meta.note})`
       : i.description;
 

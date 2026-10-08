@@ -29,6 +29,12 @@ export interface BillRequest {
   dueDate?: string;
   electricity?: { currentReading?: number; previousReading?: number; overrideAmount?: number };
   charges?: { type: string; name?: string; amount: number; note?: string }[];
+  /** Rent for this bill; with applyRentFromThisMonth it also becomes the rent from this month onward. */
+  rent?: number;
+  applyRentFromThisMonth?: boolean;
+  /** Raises (+) or lowers (-) the carried previous balance; needs previousBalanceNote. */
+  previousBalanceAdjustment?: number;
+  previousBalanceNote?: string;
   lateFee?: number;
   discount?: number;
   notes?: string;

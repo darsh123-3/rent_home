@@ -5,6 +5,7 @@ import { AuditService } from '../common/audit.service';
 import { isoDate, localDateOf, monthBounds, todayLocal } from '../common/dates';
 import { chargesByCategory } from '../common/charges';
 import { depositSummaries } from '../common/deposits';
+import { STANDING_PAYMENT_WHERE } from '../common/payment-filters';
 import { PrismaService } from '../common/prisma.service';
 import { PropertiesService } from '../properties/properties.service';
 
@@ -78,7 +79,7 @@ export class ExcelExportService {
         include: { tenant: { select: { fullName: true, status: true, phone: true } }, room: { select: { roomNumber: true } }, property: { select: { name: true } }, items: { orderBy: { sortOrder: 'asc' }, select: { type: true, description: true, amount: true, meta: true } } },
       }),
       this.prisma.payment.findMany({
-        relationLoadStrategy: 'join', where: { bill: inProp }, orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }],
+        relationLoadStrategy: 'join', where: { ...STANDING_PAYMENT_WHERE, bill: inProp }, orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }],
         include: { tenant: { select: { fullName: true } }, bill: { select: { billNumber: true, billingPeriod: true, room: { select: { roomNumber: true } }, property: { select: { name: true } } } } },
       }),
     ]);

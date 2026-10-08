@@ -33,6 +33,8 @@ interface Line {
   detail: string;
   amount: number;
   tone?: 'danger' | 'success';
+  /** Carried in from before (previous balance or its adjustment): listed after "This month's charges". */
+  carried?: boolean;
 }
 
 /** The itemised lines of a bill with a short plain-language explanation next to each. Exported for tests. */
@@ -40,7 +42,7 @@ export function breakdownLines(bill: PdfBill): Line[] {
   const lines: Line[] = [];
   for (const i of bill.items) {
     const m = i.meta ?? {};
-    if (i.type === 'RENT') lines.push({ label: 'Monthly rent', detail: `For ${monthLabel(bill.billingPeriod)}`, amount: i.amount });
+    if (i.type === 'RENT') lines.push({ label: 'Monthly rent', detail: `For ${monthLabel(bill.billingPeriod)}${typeof m.standardRent === 'number' ? '  ·  rent set for this bill' : ''}`, amount: i.amount });
     else if (i.type === 'ELECTRICITY') {
       const detail =
         m.currentReading != null
@@ -57,13 +59,16 @@ export function breakdownLines(bill: PdfBill): Line[] {
     }
     else if (i.type === 'LATE_FEE') lines.push({ label: 'Late fee', detail: 'For payment after the due date', amount: i.amount });
     else if (i.type === 'DISCOUNT') lines.push({ label: i.description || 'Discount', detail: '', amount: i.amount, tone: 'success' });
-    else if (i.type === 'PREVIOUS_BALANCE') {
+    else if (i.type === 'PREVIOUS_BALANCE' && m.adjustment) {
+      lines.push({ label: 'Previous balance adjustment', detail: typeof m.note === 'string' ? m.note : '', amount: i.amount, tone: i.amount < 0 ? 'success' : 'danger', carried: true });
+    } else if (i.type === 'PREVIOUS_BALANCE') {
       const bills: string[] = Array.isArray(m.bills) ? m.bills : [];
       lines.push({
         label: 'Previous balance',
         detail: m.openingBalance > 0 ? 'Brought forward from before' : bills.length ? `Unpaid from ${bills.slice(0, 3).join(', ')}${bills.length > 3 ? ` +${bills.length - 3}` : ''}` : 'Unpaid from earlier months',
         amount: i.amount,
         tone: 'danger',
+        carried: true,
       });
     }
   }
@@ -203,9 +208,9 @@ export async function renderBillPremiumPdf(bill: PdfBill): Promise<Buffer> {
     // ---------- Breakdown ----------
     y += 84 + 18;
     const all = breakdownLines(bill);
-    const prevLine = all.find((l) => l.label === 'Previous balance');
-    let charges = all.filter((l) => l !== prevLine);
-    const extraRows = 1 + (prevLine ? 1 : 0); // the "This month's charges" subtotal and the previous balance
+    const carried = all.filter((l) => l.carried);
+    let charges = all.filter((l) => !l.carried);
+    const extraRows = 1 + carried.length; // the "This month's charges" subtotal and what is carried in
     const summaryH = 138;
     const footerTop = PH - 54;
     // Everything must fit on the page: first the lines get their minimum height, payments use what is left, and any overflow is folded away.
@@ -222,7 +227,7 @@ export async function renderBillPremiumPdf(bill: PdfBill): Promise<Buffer> {
     const lines: (Line & { subtotal?: boolean })[] = [
       ...charges,
       { label: "This month's charges", detail: 'Rent, electricity and other charges for this month', amount: monthTotal, subtotal: true },
-      ...(prevLine ? [prevLine] : []),
+      ...carried,
     ];
     const leftover = available - lines.length * MIN_ROW;
     const fit = bill.payments.length ? Math.max(0, Math.min(6, bill.payments.length, Math.floor((leftover - 34 - 16) / 21))) : 0;

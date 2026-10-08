@@ -31,3 +31,9 @@ export function useRecordPayment(billId: string) {
     onSuccess: invalidate,
   });
 }
+
+/** Undoes a payment recorded by mistake (a reversal entry is added; nothing is deleted). */
+export function useReversePayment() {
+  const invalidate = useInvalidateCore();
+  return useMutation({ mutationFn: ({ id, reason }: { id: string; reason: string }) => api.post(`/payments/${id}/reverse`, { reason }), onSuccess: invalidate });
+}

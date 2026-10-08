@@ -20,6 +20,8 @@ const emptyMonthly = (): Record<MonthlyChargeType, MonthlyRow> => ({ WATER: { am
 /** The Generate Bill form filled from an existing bill, for editing it. `preview` is the server's preview of the edit. */
 function billToForm(bill: BillDetail, preview: BillPreview) {
   const el = bill.items.find((i) => i.type === 'ELECTRICITY');
+  const rentItem = bill.items.find((i) => i.type === 'RENT');
+  const adjustmentItem = bill.items.find((i) => i.type === 'PREVIOUS_BALANCE' && i.meta?.adjustment);
   const m = (el?.meta ?? {}) as Record<string, unknown>;
   const metered = typeof m.currentReading === 'number';
   const monthly = emptyMonthly();
@@ -36,8 +38,13 @@ function billToForm(bill: BillDetail, preview: BillPreview) {
   return {
     reading: metered ? String(m.currentReading) : '', prevReading: prev, rate, manual, manualAmount: manual && el ? String(el.amount) : '',
     monthly, charges, lateFee: bill.lateFee > 0 ? String(bill.lateFee) : '', discount: bill.discount > 0 ? String(bill.discount) : '', dueDate: bill.dueDate.slice(0, 10),
+    rent: rentItem && typeof rentItem.meta?.standardRent === 'number' ? String(rentItem.amount) : null,
+    adjustment: adjustmentItem ? String(adjustmentItem.amount) : '', adjustmentNote: adjustmentItem && typeof adjustmentItem.meta?.note === 'string' ? adjustmentItem.meta.note : '',
   };
 }
+
+/** Signed amount for the previous balance adjustment: 500 or -500 (at most 2 decimals). */
+const signedNum = (s: string) => (/^-?\d+(\.\d{1,2})?$/.test(s.trim()) && Number(s) !== 0 ? Number(s) : undefined);
 
 const num = (s: string) => (s.trim() !== '' && /^\d+(\.\d{1,2})?$/.test(s.trim()) ? Number(s) : undefined);
 
@@ -62,6 +69,11 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
   const [seeded, setSeeded] = useState(false);
   const [lateFee, setLateFee] = useState('');
   const [discount, setDiscount] = useState('');
+  /** null: the tenant's usual rent. A value: the rent for this bill. */
+  const [rentText, setRentText] = useState<string | null>(null);
+  const [rentFromNow, setRentFromNow] = useState(false);
+  const [adjustment, setAdjustment] = useState('');
+  const [adjustmentNote, setAdjustmentNote] = useState('');
   const [dueDate, setDueDate] = useState<string | undefined>();
   const [chargeModal, setChargeModal] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -90,12 +102,18 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
         ...charges.filter((c) => num(c.amount)).map((c) => ({ type: c.type, name: c.name, amount: Number(c.amount) })),
       ],
       lateFee: num(lateFee), discount: num(discount),
+      ...(rentText !== null && num(rentText) !== undefined ? { rent: num(rentText), applyRentFromThisMonth: rentFromNow } : {}),
+      // Sent only with its reason; until then the reason box asks for one.
+      ...(signedNum(adjustment) && adjustmentNote.trim() ? { previousBalanceAdjustment: signedNum(adjustment), previousBalanceNote: adjustmentNote.trim() } : {}),
     };
-  }, [tenantId, period, dueDate, editing, manual, reading, prevReading, rate, manualAmount, monthly, charges, lateFee, discount]);
+  }, [tenantId, period, dueDate, editing, rentText, rentFromNow, adjustment, adjustmentNote, manual, reading, prevReading, rate, manualAmount, monthly, charges, lateFee, discount]);
 
   const debounced = useDebounced(request, 200);
   const preview = useBillPreview(debounced);
-  const data = preview.data;
+  // The last good preview stays on screen while a change is being corrected (an error must not hide the form).
+  const [lastGood, setLastGood] = useState<BillPreview | undefined>();
+  if (preview.data && preview.data !== lastGood) setLastGood(preview.data);
+  const data = preview.data ?? lastGood;
   const saveRate = useChangeElectricity(data?.assignmentId ?? '');
   const settling = request !== debounced || preview.isFetching;
 
@@ -108,6 +126,7 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
       const f = billToForm(editing, data);
       setReading(f.reading); setPrevReading(f.prevReading); setRate(f.rate); setManual(f.manual); setManualAmount(f.manualAmount);
       setMonthly(f.monthly); setCharges(f.charges); setLateFee(f.lateFee); setDiscount(f.discount); setDueDate(f.dueDate);
+      setRentText(f.rent); setAdjustment(f.adjustment); setAdjustmentNote(f.adjustmentNote);
     } else {
       // Recurring Water / Housekeeping / MNGL / WiFi fill their own row (first one of each); anything else is an other charge.
       const seed = emptyMonthly();
@@ -144,9 +163,11 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
     const otherP = MONTHLY_CHARGE_TYPES.reduce((sum, t) => sum + p(num(monthly[t].amount) ?? 0), 0) + charges.reduce((sum, c) => sum + p(num(c.amount) ?? 0), 0);
     const lateP = p(num(lateFee) ?? 0);
     const discP = p(num(discount) ?? 0);
-    const gross = p(data.totals.rent) + elecP + otherP + lateP + p(data.totals.previousBalance);
+    const rentP = p(rentText !== null && num(rentText) !== undefined ? num(rentText)! : data.standardRent);
+    const prevP = Math.max(0, p(data.carriedBalance) + p(signedNum(adjustment) ?? 0));
+    const gross = rentP + elecP + otherP + lateP + prevP;
     return { electricity: elecP / 100, units, rate: r, total: (gross - discP) / 100 };
-  }, [data, manual, manualAmount, reading, prevReading, rate, monthly, charges, lateFee, discount]);
+  }, [data, rentText, adjustment, manual, manualAmount, reading, prevReading, rate, monthly, charges, lateFee, discount]);
   const previewError = preview.error ? (preview.error instanceof ApiError ? preview.error.message : friendlyError(preview.error)) : null;
   const needsReading = el?.mode === 'METER' && !manual && (el?.needsReading ?? true);
   const canGenerate = !!data && !previewError && !settling && !needsReading && !saving;
@@ -168,7 +189,7 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
   };
 
   const tenantOptions = (tenantsQuery.data?.items ?? []).filter((t) => t.assignmentId).map((t) => ({ value: t.id, label: `${t.fullName} · Room ${t.room?.roomNumber}` }));
-  const reset = () => { setTenantId(undefined); setSeeded(false); setPeriod(undefined); setMonthly(emptyMonthly()); setCharges([]); setReading(''); setPrevReading(null); setRate(null); };
+  const reset = () => { setTenantId(undefined); setLastGood(undefined); setSeeded(false); setPeriod(undefined); setMonthly(emptyMonthly()); setCharges([]); setReading(''); setPrevReading(null); setRate(null); };
 
   return (
     <Page title={editing ? 'Edit Bill' : 'Generate Bill'} subtitle={editing ? editing.billNumber : current?.name} back>
@@ -182,13 +203,25 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
             {!fixedTenant ? <button type="button" onClick={reset} className="text-small font-medium text-primary">Change</button> : null}
           </Card>
           {editing ? (
-            <Notice tone="warning">Editing the {formatYM(toYM(editing.billingPeriod))} bill. Saving creates a corrected bill with a new number and cancels {editing.billNumber}. The month cannot be changed.</Notice>
+            <Notice tone="warning">
+              Editing the {formatYM(toYM(editing.billingPeriod))} bill. Saving creates a corrected bill with a new number and cancels {editing.billNumber}. The month cannot be changed.
+              {editing.paidAmount > 0 ? ` The ${formatINR(editing.paidAmount)} already paid moves to the corrected bill with the same dates.` : ''}
+            </Notice>
           ) : period ? <MonthStepper label="Billing Month" value={period} onChange={setPeriod} /> : <Skeleton className="h-12" />}
           {previewError ? <Notice tone="danger">{previewError}</Notice> : null}
 
           {data ? (
             <>
-              <Card><DetailRow label="Rent" value={formatINR(data.rent)} strong last /></Card>
+              <Card className="space-y-2">
+                <Input label="Rent for this bill" prefix="₹" inputMode="decimal" value={rentText ?? String(data.standardRent)} onChange={(e) => setRentText(e.target.value)}
+                  hint={rentText !== null && num(rentText) !== data.standardRent ? `Usual rent: ${formatINR(data.standardRent)}` : "The tenant's monthly rent. Change it for this bill if needed."} />
+                {rentText !== null && num(rentText) !== undefined && num(rentText) !== data.standardRent ? (
+                  <label className="flex items-start gap-2 text-small text-ink-soft">
+                    <input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={rentFromNow} onChange={(e) => setRentFromNow(e.target.checked)} />
+                    <span>Also make {formatINR(num(rentText))} the monthly rent from {formatYM(period ?? toYM(data.billingPeriod))} onward (later bills use it too)</span>
+                  </label>
+                ) : null}
+              </Card>
 
               {el && el.mode !== 'NONE' ? (
                 <Card className="space-y-3">
@@ -250,6 +283,11 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
               )}
 
               <SectionHeader title="Adjustments" />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input label="Adjust previous balance" prefix="₹" inputMode="text" placeholder="0" value={adjustment} onChange={(e) => setAdjustment(e.target.value)}
+                  hint={`Unpaid from earlier bills: ${formatINR(data.carriedBalance)}. Type 500 to add, -500 to reduce.`} error={adjustment.trim() && signedNum(adjustment) === undefined ? 'Enter an amount like 500 or -500' : undefined} />
+                {signedNum(adjustment) ? <Input label="Reason for the adjustment" placeholder="e.g. Old dues from the register" maxLength={100} error={adjustmentNote.trim() ? undefined : 'Enter a reason to apply this adjustment'} value={adjustmentNote} onChange={(e) => setAdjustmentNote(e.target.value)} /> : null}
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <Input label="Late fee" prefix="₹" inputMode="decimal" placeholder="0" value={lateFee} onChange={(e) => setLateFee(e.target.value)} />
                 <Input label="Discount" prefix="₹" inputMode="decimal" placeholder="0" value={discount} onChange={(e) => setDiscount(e.target.value)} />
@@ -259,12 +297,13 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
 
               <SectionHeader title="Summary" />
               <Card>
-                <DetailRow label="Rent" value={formatINR(data.totals.rent)} />
+                <DetailRow label={data.rent !== data.standardRent ? 'Rent (set for this bill)' : 'Rent'} value={formatINR(data.totals.rent)} />
                 {data.totals.electricity > 0 ? <DetailRow label="Electricity" value={formatINR(data.totals.electricity)} /> : null}
                 {data.charges.map((c, i) => <DetailRow key={i} label={c.name} value={formatINR(c.amount)} />)}
                 {data.totals.lateFee > 0 ? <DetailRow label="Late fee" value={formatINR(data.totals.lateFee)} /> : null}
                 {data.totals.discount > 0 ? <DetailRow label="Discount" value={`-${formatINR(data.totals.discount)}`} tone="success" /> : null}
-                {data.totals.previousBalance > 0 ? <DetailRow label={`${data.openingBalance > 0 && data.carriedBills.length === 0 ? 'Outstanding (from before)' : 'Previous balance'}${data.carriedBills.length ? ` (not paid: ${data.carriedBills.map((c) => formatYM(toYM(c.billingPeriod))).join(', ')})` : ''}`} value={formatINR(data.totals.previousBalance)} tone="danger" /> : null}
+                {data.carriedBalance > 0 ? <DetailRow label={`${data.openingBalance > 0 && data.carriedBills.length === 0 ? 'Outstanding (from before)' : 'Previous balance'}${data.carriedBills.length ? ` (not paid: ${data.carriedBills.map((c) => formatYM(toYM(c.billingPeriod))).join(', ')})` : ''}`} value={formatINR(data.carriedBalance)} tone="danger" /> : null}
+                {data.previousBalanceAdjustment !== 0 ? <DetailRow label="Previous balance adjustment" value={data.previousBalanceAdjustment < 0 ? `-${formatINR(-data.previousBalanceAdjustment)}` : formatINR(data.previousBalanceAdjustment)} tone={data.previousBalanceAdjustment < 0 ? 'success' : 'danger'} /> : null}
                 <DetailRow label="Total" value={formatINR(data.totals.totalDue)} strong last />
               </Card>
               <p className="text-center text-caption text-ink-muted">Totals are calculated and verified by the server for {formatYM(period ?? toYM(data.billingPeriod))}. Due {formatDate(dueDate ?? data.dueDate)}.</p>
@@ -289,9 +328,8 @@ export function EditBillPage() {
   const { data: bill, isLoading, isError, error, refetch } = useBill(id);
   if (isLoading) return <Page title="Edit Bill" back><Skeleton className="h-28" /></Page>;
   if (isError || !bill) return <Page title="Edit Bill" back><ErrorState error={error} onRetry={() => void refetch()} /></Page>;
-  if (bill.status === 'CANCELLED' || bill.paidAmount > 0 || bill.carriedInto) {
+  if (bill.status === 'CANCELLED' || bill.carriedInto) {
     const why = bill.status === 'CANCELLED' ? 'This bill is cancelled.'
-      : bill.paidAmount > 0 ? 'This bill already has payments, so it cannot be edited. Put any correction on the next bill as an extra charge or a discount.'
         : `This bill's balance is already part of ${bill.carriedInto!.billNumber}. Edit that bill instead.`;
     return <Page title="Edit Bill" subtitle={bill.billNumber} back><Notice tone="warning">{why}</Notice></Page>;
   }

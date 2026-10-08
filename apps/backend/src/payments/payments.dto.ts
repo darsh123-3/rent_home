@@ -25,3 +25,7 @@ export class ListPaymentsQuery extends PaginationQuery {
   @IsOptional() @Matches(DATE, { message: 'From date must be in YYYY-MM-DD format' }) from?: string;
   @IsOptional() @Matches(DATE, { message: 'To date must be in YYYY-MM-DD format' }) to?: string;
 }
+
+export class ReversePaymentDto {
+  @IsString() @MaxLength(200) @Matches(/\S/, { message: 'Enter a reason, e.g. "Recorded twice"' }) reason: string;
+}

@@ -168,6 +168,9 @@ export interface BillItemRow {
   meta: Record<string, any> | null;
 }
 
+/** Set when the payment was undone (recorded by mistake, or moved to a corrected bill). It no longer counts. */
+export interface PaymentReversal { on: string; reason: string | null }
+
 export interface PaymentRow {
   id: string;
   billId: string;
@@ -176,6 +179,7 @@ export interface PaymentRow {
   method: PaymentMethod;
   reference: string | null;
   notes: string | null;
+  reversed: PaymentReversal | null;
 }
 
 export interface BillDetail {
@@ -225,6 +229,11 @@ export interface BillPreview {
   suggestedPeriod: string;
   dueDate: string;
   rent: number;
+  /** The tenant's rent for the month from the rent history; `rent` differs when it was changed for this bill. */
+  standardRent: number;
+  /** Unpaid earlier bills (and any opening balance) before the owner's adjustment. */
+  carriedBalance: number;
+  previousBalanceAdjustment: number;
   electricity: {
     mode: ElectricityMode;
     previousReading: number | null;
@@ -253,6 +262,7 @@ export interface PaymentListItem {
   method: PaymentMethod;
   reference: string | null;
   notes: string | null;
+  reversed: PaymentReversal | null;
   tenant: { id: string; fullName: string };
   bill: { id: string; billNumber: string; billingPeriod: string; room: { roomNumber: string } };
 }
