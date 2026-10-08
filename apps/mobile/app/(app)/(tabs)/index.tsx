@@ -55,9 +55,9 @@ export default function HomeScreen() {
     left = (
       <>
         <Pressable onPress={() => router.push('/reports')} accessibilityRole="button" className="rounded-xl bg-primary p-5 active:bg-primary-dark">
-          <Text variant="secondaryMedium" tone="white" className="opacity-80">Collection · {c.monthLabel}</Text>
+          <Text variant="secondaryMedium" tone="white" className="opacity-80">Money received in {c.monthLabel}</Text>
           <Text variant="display" tone="white" className="mt-1" style={{ fontSize: 34, lineHeight: 40 }}>{formatINR(c.collected)}</Text>
-          <Text variant="secondary" tone="white" className="mb-4 opacity-80">of {formatINR(c.expected)} billed · {Math.round(c.collectionRate * 100)}% collected</Text>
+          <Text variant="secondary" tone="white" className="mb-4 opacity-80">{c.monthLabel} bills total {formatINR(c.expected)}</Text>
           <ProgressBar value={c.collectionRate} />
           {k && k.composition.bills > 0 ? (
             <Text variant="caption" tone="white" className="mt-3 opacity-90">
