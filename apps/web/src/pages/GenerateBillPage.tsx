@@ -103,8 +103,7 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
       ],
       lateFee: num(lateFee), discount: num(discount),
       ...(rentText !== null && num(rentText) !== undefined ? { rent: num(rentText), applyRentFromThisMonth: rentFromNow } : {}),
-      // Sent only with its reason; until then the reason box asks for one.
-      ...(signedNum(adjustment) && adjustmentNote.trim() ? { previousBalanceAdjustment: signedNum(adjustment), previousBalanceNote: adjustmentNote.trim() } : {}),
+      ...(signedNum(adjustment) ? { previousBalanceAdjustment: signedNum(adjustment), previousBalanceNote: adjustmentNote.trim() || undefined } : {}),
     };
   }, [tenantId, period, dueDate, editing, rentText, rentFromNow, adjustment, adjustmentNote, manual, reading, prevReading, rate, manualAmount, monthly, charges, lateFee, discount]);
 
@@ -223,6 +222,23 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
                 ) : null}
               </Card>
 
+              <Card className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-heading">Previous due</span>
+                  <span className={`font-medium ${data.carriedBalance > 0 ? 'text-danger' : 'text-ink-soft'}`}>{data.carriedBalance > 0 ? formatINR(data.carriedBalance) : 'Nil'}</span>
+                </div>
+                <p className="text-small text-ink-soft">
+                  {data.carriedBalance > 0
+                    ? `Unpaid from earlier bills${data.carriedBills.length ? ` (${data.carriedBills.map((c) => formatYM(toYM(c.billingPeriod))).join(', ')})` : ''}. It is added to this bill automatically.`
+                    : 'Nothing unpaid from earlier bills in the app.'}
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input label="Add previous due (if any)" prefix="₹" inputMode="text" placeholder="0" value={adjustment} onChange={(e) => setAdjustment(e.target.value)}
+                    hint="Old dues not in the app, e.g. 2000. Type -500 to reduce." error={adjustment.trim() && signedNum(adjustment) === undefined ? 'Enter an amount like 2000 or -500' : undefined} />
+                  {signedNum(adjustment) ? <Input label="Reason (optional)" placeholder="e.g. Old dues from the register" maxLength={100} hint="Printed next to the amount on the bill" value={adjustmentNote} onChange={(e) => setAdjustmentNote(e.target.value)} /> : null}
+                </div>
+              </Card>
+
               {el && el.mode !== 'NONE' ? (
                 <Card className="space-y-3">
                   <div className="flex items-center gap-2"><Icon icon={Zap} tone="primary" /><span className="text-heading">Electricity</span></div>
@@ -283,11 +299,6 @@ export function GenerateBillPage({ editing }: { editing?: BillDetail } = {}) {
               )}
 
               <SectionHeader title="Adjustments" />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Input label="Adjust previous balance" prefix="₹" inputMode="text" placeholder="0" value={adjustment} onChange={(e) => setAdjustment(e.target.value)}
-                  hint={`Unpaid from earlier bills: ${formatINR(data.carriedBalance)}. Type 500 to add, -500 to reduce.`} error={adjustment.trim() && signedNum(adjustment) === undefined ? 'Enter an amount like 500 or -500' : undefined} />
-                {signedNum(adjustment) ? <Input label="Reason for the adjustment" placeholder="e.g. Old dues from the register" maxLength={100} error={adjustmentNote.trim() ? undefined : 'Enter a reason to apply this adjustment'} value={adjustmentNote} onChange={(e) => setAdjustmentNote(e.target.value)} /> : null}
-              </div>
               <div className="grid grid-cols-2 gap-3">
                 <Input label="Late fee" prefix="₹" inputMode="decimal" placeholder="0" value={lateFee} onChange={(e) => setLateFee(e.target.value)} />
                 <Input label="Discount" prefix="₹" inputMode="decimal" placeholder="0" value={discount} onChange={(e) => setDiscount(e.target.value)} />

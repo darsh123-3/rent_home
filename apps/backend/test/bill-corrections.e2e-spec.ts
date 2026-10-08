@@ -93,7 +93,8 @@ describe('Bill corrections: payment reversal, previous balance adjustment, rent 
       const base = (await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-08' }).expect(200)).body.data;
       const carried = base.totals.previousBalance;
       expect(carried).toBeGreaterThan(0);
-      await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-08', previousBalanceAdjustment: 500 }).expect(400); // reason needed
+      // The reason is optional
+      expect((await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-08', previousBalanceAdjustment: 500 }).expect(200)).body.data.totals.previousBalance).toBe(carried + 500);
       await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-08', previousBalanceAdjustment: -(carried + 1), previousBalanceNote: 'x' }).expect(400); // not below zero
       const up = (await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-08', previousBalanceAdjustment: 500, previousBalanceNote: 'Old dues from the register' }).expect(200)).body.data;
       expect(up).toMatchObject({ carriedBalance: carried, previousBalanceAdjustment: 500 });
@@ -133,6 +134,32 @@ describe('Bill corrections: payment reversal, previous balance adjustment, rent 
       expect((await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-10' }).expect(200)).body.data).toMatchObject({ rent: 7000, standardRent: 7000 });
       expect(await prisma.auditLog.count({ where: { action: 'assignment.rent_change', entityId: assignmentId } })).toBe(1);
       await owner.post('/bills/preview', { assignmentId, billingPeriod: '2026-10', rent: -1 }).expect(400);
+    });
+  });
+
+  describe('a part payment', () => {
+    it('leaves the rest as outstanding everywhere, then carries it into the next bill', async () => {
+      // Tenant A: rent ₹2,000 for September, pays ₹1,800.
+      const roomId = (await owner.post('/rooms', { propertyId, roomNumber: 'A1', defaultRent: 2000, electricityMode: 'NONE' })).body.data.id;
+      const a = (await owner.post('/tenants', { fullName: 'Tenant A', phone: '9000000111', joiningDate: '2026-09-01', assignment: { roomId, startDate: '2026-09-01', agreedRent: 2000 } })).body.data;
+      const sep = (await owner.post('/bills', { assignmentId: a.currentAssignment.id, billingPeriod: '2026-09' }).expect(201)).body.data;
+      const paid = (await owner.post(`/bills/${sep.id}/payments`, { amount: 1800, paymentDate: '2026-10-05', method: 'CASH' }).expect(201)).body.data.bill;
+
+      // ₹200 outstanding: on the bill, the tenant, the tenant list and the outstanding report
+      expect(paid).toMatchObject({ totalDue: 2000, paidAmount: 1800, balance: 200, storedStatus: 'PARTIALLY_PAID', lastPayment: { amount: 1800, paymentDate: '2026-10-05' } });
+      expect((await owner.get(`/tenants/${a.id}`)).body.data.outstanding).toBe(200);
+      expect((await owner.get(`/tenants?propertyId=${propertyId}&search=Tenant A`)).body.data.items[0].balance).toBe(200);
+      const report = (await owner.get(`/reports/outstanding?propertyId=${propertyId}`)).body.data;
+      expect(report.items.find((i: { tenantId: string }) => i.tenantId === a.id)).toMatchObject({ balance: 200, billCount: 1 });
+
+      // The October bill brings the ₹200 in as "Previous balance", and it is counted once
+      const oct = (await owner.post('/bills', { assignmentId: a.currentAssignment.id, billingPeriod: '2026-10' }).expect(201)).body.data;
+      expect(oct).toMatchObject({ previousBalance: 200, totalDue: 2200 });
+      expect(oct.items.at(-1)).toMatchObject({ type: 'PREVIOUS_BALANCE', amount: 200 });
+      expect(oct.absorbed).toEqual([expect.objectContaining({ id: sep.id, billNumber: sep.billNumber })]);
+      expect((await owner.get(`/bills/${sep.id}`)).body.data.carriedInto).toMatchObject({ id: oct.id });
+      expect((await owner.get(`/tenants/${a.id}`)).body.data.outstanding).toBe(2200);
+      expect(await pdfText(owner, app, `/bills/${oct.id}/pdf`)).toContain(`Unpaid from ${sep.billNumber}`);
     });
   });
 });

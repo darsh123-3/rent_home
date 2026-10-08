@@ -167,10 +167,10 @@ export class BillsService {
     const hasEarlierBill = await db.bill.findFirst({ where: { assignmentId: assignment.id, status: { not: 'CANCELLED' }, billingPeriod: { lt: period } }, select: { id: true } });
     const openingBalance = hasEarlierBill ? 0 : money(assignment.openingBalance);
     const carriedBalance = fromPaise(carry.reduce((s, b) => s + toPaise(b.balance), 0) + toPaise(openingBalance));
-    // The owner can raise or lower it on this bill (old dues not in the app, a correction); it is shown as its own line.
+    // The owner can raise or lower it on this bill (old dues not in the app, a correction); it is shown as its own line,
+    // with the reason when one is given.
     const adjustment = dto.previousBalanceAdjustment ?? 0;
     const adjustmentNote = dto.previousBalanceNote?.trim() || undefined;
-    if (adjustment !== 0 && !adjustmentNote) throw new BadRequestException('Enter a reason for the previous balance adjustment');
     const previousBalance = fromPaise(toPaise(carriedBalance) + toPaise(adjustment));
     if (previousBalance < 0) throw new BadRequestException(`The adjustment cannot take the previous balance below zero (it is ${formatINR(carriedBalance)})`);
 
