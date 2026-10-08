@@ -1,4 +1,4 @@
-import { Banknote, CircleCheck, Link2 } from 'lucide-react';
+import { Banknote, CircleCheck, Link2, Pencil } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { friendlyError } from '@/api/client';
@@ -9,7 +9,7 @@ import { BillActions } from '@/features/bills/BillActions';
 import { BillStatusBadge } from '@/features/bills/BillCard';
 import { AgreementBadge } from '@/features/tenants/AgreementBadge';
 import { METHOD_LABEL } from '@/features/payments/constants';
-import { formatDate, formatINR, formatMonth } from '@/utils/format';
+import { formatDate, formatINR, formatMonth, formatMonthShort } from '@/utils/format';
 import type { BillDetail, BillItemRow } from '@rental/shared';
 
 const itemLabel = (i: BillItemRow) =>
@@ -56,6 +56,7 @@ export function BillDetailPage() {
   return (
     <Page title={formatMonth(bill.billingPeriod)} subtitle={bill.billNumber} back="/bills">
       {created ? <Banner title="Bill Generated">The totals were calculated and verified by the server.</Banner> : null}
+      {params.get('edited') === '1' ? <Banner title="Bill updated">{bill.notes?.split('\n')[0] ?? 'The corrected bill replaces the old one.'} The old bill is kept as cancelled.</Banner> : null}
       {paid ? <Banner title="Payment recorded">{bill.balance > 0 ? `${formatINR(bill.balance)} still pending on this bill.` : 'This bill is now fully paid.'}</Banner> : null}
 
       <Card className="space-y-2">
@@ -75,7 +76,10 @@ export function BillDetailPage() {
       <Card>
         {bill.items.map((i, idx) => (
           <div key={i.id} className={`flex min-h-11 items-center justify-between gap-4 py-2.5 ${idx < bill.items.length - 1 ? 'border-b border-line' : ''}`}>
-            <span className={`flex-1 text-small ${i.type === 'PREVIOUS_BALANCE' ? 'text-danger' : 'text-ink-soft'}`}>{itemLabel(i)}</span>
+            <span className={`flex-1 text-small ${i.type === 'PREVIOUS_BALANCE' ? 'text-danger' : 'text-ink-soft'}`}>
+              {itemLabel(i)}
+              {i.type === 'PREVIOUS_BALANCE' && bill.absorbed.length ? <span className="block text-caption text-ink-muted">Not paid on {bill.absorbed.map((b) => `${formatMonthShort(b.billingPeriod)} (${b.billNumber})`).join(', ')}</span> : null}
+            </span>
             <span className={`font-medium ${i.amount < 0 ? 'text-success' : ''}`}>{i.amount < 0 ? `-${formatINR(-i.amount)}` : formatINR(i.amount)}</span>
           </div>
         ))}
@@ -118,6 +122,7 @@ export function BillDetailPage() {
 
       {canCancel ? (
         <div className="mt-6 space-y-2">
+          <LinkButton to={`/bills/${bill.id}/edit`} icon={Pencil} variant="secondary">Edit Bill</LinkButton>
           <Button variant="danger" onClick={() => setConfirming(true)}>Cancel Bill</Button>
           {actionError ? <Notice tone="danger">{actionError}</Notice> : null}
         </div>

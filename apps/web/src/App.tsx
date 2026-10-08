@@ -12,7 +12,7 @@ import { BillDetailPage } from '@/pages/BillDetailPage';
 import { BillSettingsPage } from '@/pages/BillSettingsPage';
 import { BillsPage } from '@/pages/BillsPage';
 import { EditTenantPage } from '@/pages/EditTenantPage';
-import { GenerateBillPage } from '@/pages/GenerateBillPage';
+import { EditBillPage, GenerateBillPage } from '@/pages/GenerateBillPage';
 import { HelpPage } from '@/pages/HelpPage';
 import { HomePage } from '@/pages/HomePage';
 import { LoginPage } from '@/pages/LoginPage';
@@ -60,6 +60,7 @@ function AppRoutes() {
         <Route path="tenants/:id/assign" element={<AssignRoomPage />} />
         <Route path="bills" element={<BillsPage />} />
         <Route path="bills/new" element={<GenerateBillPage />} />
+        <Route path="bills/:id/edit" element={<EditBillPage />} />
         <Route path="bills/:id" element={<BillDetailPage />} />
         <Route path="payments" element={<PaymentsPage />} />
         <Route path="payments/new" element={<RecordPaymentPage />} />

@@ -22,6 +22,8 @@ export const useBill = (id?: string) => useQuery({ queryKey: ['bills', 'detail',
 
 export interface BillRequest {
   assignmentId?: string;
+  /** Editing: the bill being replaced (preview only; the edit itself goes to /bills/:id/revise). */
+  replacingBillId?: string;
   tenantId?: string;
   billingPeriod?: string;
   dueDate?: string;
@@ -53,4 +55,10 @@ export function useCreateBill() {
 export function useCancelBill(id: string) {
   const invalidate = useInvalidateCore();
   return useMutation({ mutationFn: (reason?: string) => api.post<BillDetail>(`/bills/${id}/cancel`, { reason }), onSuccess: invalidate });
+}
+
+/** Edits a bill: the server cancels it and creates a corrected bill for the same month, in one step. */
+export function useReviseBill(id: string) {
+  const invalidate = useInvalidateCore();
+  return useMutation({ mutationFn: (body: BillRequest) => api.post<BillDetail>(`/bills/${id}/revise`, body), onSuccess: invalidate });
 }

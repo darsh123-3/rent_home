@@ -26,6 +26,8 @@ export class BillChargeDto {
 /** Amounts here are inputs only; the server recalculates and stores its own totals. */
 export class PreviewBillDto {
   @IsOptional() @IsUUID() assignmentId?: string;
+  /** Preview only: the bill being edited. It is left out of the duplicate checks and its carried-in balances count again. */
+  @IsOptional() @IsUUID() replacingBillId?: string;
   @IsOptional() @IsUUID() tenantId?: string;
   @IsOptional() @Matches(/^\d{4}-(0[1-9]|1[0-2])(-01)?$/, { message: 'Billing month must look like 2026-09' }) billingPeriod?: string;
   @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Due date must be in YYYY-MM-DD format' }) dueDate?: string;

@@ -66,7 +66,7 @@ interface Draft {
   electricity: ReturnType<typeof calculateElectricity>;
   charges: DraftCharge[];
   totals: ReturnType<typeof calculateBill>;
-  carry: { id: string; billNumber: string; balance: number }[];
+  carry: { id: string; billNumber: string; billingPeriod: Date; balance: number }[];
   /** Pre-system balance, only on an assignment's first live bill. */
   openingBalance: number;
   notes?: string;
@@ -105,16 +105,17 @@ export class BillsService {
   }
 
   /** Builds the full, server-calculated bill without saving anything. */
-  private async buildDraft(userId: string, dto: PreviewBillDto, db: Prisma.TransactionClient | PrismaService = this.prisma, lenient = false): Promise<{ draft: Draft; suggestedPeriod: Date; needsReading: boolean }> {
+  private async buildDraft(userId: string, dto: PreviewBillDto, db: Prisma.TransactionClient | PrismaService = this.prisma, lenient = false, replacing?: { id: string; billingPeriod: Date }): Promise<{ draft: Draft; suggestedPeriod: Date; needsReading: boolean }> {
     const assignment = await this.resolveAssignment(userId, dto);
     const suggestedPeriod = await this.suggestPeriod(assignment);
-    const period = dto.billingPeriod ? monthStart(parseDate(`${dto.billingPeriod.slice(0, 7)}-01`, 'Billing month')) : suggestedPeriod;
+    // An edited bill keeps its month.
+    const period = replacing ? replacing.billingPeriod : dto.billingPeriod ? monthStart(parseDate(`${dto.billingPeriod.slice(0, 7)}-01`, 'Billing month')) : suggestedPeriod;
 
     if (period < monthStart(assignment.startDate)) throw new BadRequestException('This is before the tenant moved in');
     if (assignment.endDate && period > monthStart(assignment.endDate)) throw new BadRequestException('This is after the tenant moved out');
-    if (period > addMonths(monthStart(todayLocal()), 1)) throw new BadRequestException('Bills can be generated up to one month ahead');
+    if (!replacing && period > addMonths(monthStart(todayLocal()), 1)) throw new BadRequestException('Bills can be generated up to one month ahead');
 
-    const live = { assignmentId: assignment.id, status: { not: 'CANCELLED' as BillStatus } };
+    const live = { assignmentId: assignment.id, status: { not: 'CANCELLED' as BillStatus }, ...(replacing ? { id: { not: replacing.id } } : {}) };
     const existing = await db.bill.findFirst({ where: { ...live, billingPeriod: period } });
     if (existing) throw new ConflictException(`A bill for ${monthLabel(period)} already exists for this tenant (${existing.billNumber})`);
     const later = await db.bill.findFirst({ where: { ...live, billingPeriod: { gt: period } } });
@@ -146,9 +147,13 @@ export class BillsService {
     const charges = orderCharges(dto.charges ?? []);
 
     // Unpaid balance of earlier bills rolls into this one.
-    const open = await db.bill.findMany({ where: { tenantId: assignment.tenantId, ...OUTSTANDING_BILL_WHERE, billingPeriod: { lt: period } }, orderBy: { billingPeriod: 'asc' } });
+    // When editing, balances that were carried into the bill being replaced are open again for the corrected one.
+    const openWhere: Prisma.BillWhereInput = replacing
+      ? { status: { notIn: ['CANCELLED', 'DRAFT'] }, OR: [{ carriedForwardToId: null }, { carriedForwardToId: replacing.id }], id: { not: replacing.id } }
+      : OUTSTANDING_BILL_WHERE;
+    const open = await db.bill.findMany({ where: { tenantId: assignment.tenantId, ...openWhere, billingPeriod: { lt: period } }, orderBy: { billingPeriod: 'asc' } });
     const carry = open
-      .map((b) => ({ id: b.id, billNumber: b.billNumber, balance: fromPaise(toPaise(money(b.totalDue)) - toPaise(money(b.paidAmount))) }))
+      .map((b) => ({ id: b.id, billNumber: b.billNumber, billingPeriod: b.billingPeriod, balance: fromPaise(toPaise(money(b.totalDue)) - toPaise(money(b.paidAmount))) }))
       .filter((b) => b.balance > 0);
     // A balance owed from before this system (e.g. a spreadsheet) joins the very first bill of the assignment.
     const hasEarlierBill = await db.bill.findFirst({ where: { assignmentId: assignment.id, status: { not: 'CANCELLED' }, billingPeriod: { lt: period } }, select: { id: true } });
@@ -165,7 +170,10 @@ export class BillsService {
   }
 
   async preview(userId: string, dto: PreviewBillDto) {
-    const { draft, suggestedPeriod, needsReading } = await this.buildDraft(userId, dto, this.prisma, true);
+    // Editing: the bill keeps its own tenant and month, and is left out of the checks.
+    const replacing = dto.replacingBillId ? await this.editableBill(userId, dto.replacingBillId) : undefined;
+    const body = replacing ? { ...dto, assignmentId: replacing.assignmentId, tenantId: undefined } : dto;
+    const { draft, suggestedPeriod, needsReading } = await this.buildDraft(userId, body, this.prisma, true, replacing);
     const a = draft.assignment;
     const recurring = await this.prisma.charge.findMany({ where: { assignmentId: a.id, isActive: true }, orderBy: { createdAt: 'asc' } });
     return {
@@ -189,73 +197,124 @@ export class BillsService {
   async create(userId: string, dto: CreateBillDto) {
     if (!dto.billingPeriod) throw new BadRequestException('Select the billing month');
     try {
-      const bill = await this.prisma.$transaction(async (tx) => {
-        // Re-run every check inside the transaction; the client's numbers are never stored.
-        const { draft } = await this.buildDraft(userId, dto, tx);
-        const { assignment: a, totals } = draft;
-        const property = await tx.property.update({ where: { id: a.room.propertyId }, data: { nextBillSeq: { increment: 1 } }, select: { billPrefix: true, nextBillSeq: true } });
-        const seq = property.nextBillSeq - 1;
-        const billNumber = `${property.billPrefix}-${draft.period.getUTCFullYear()}${String(draft.period.getUTCMonth() + 1).padStart(2, '0')}-${String(seq).padStart(4, '0')}`;
-
-        const el = draft.electricity;
-        const items: { type: BillItemType; description: string; amount: number; meta?: Prisma.InputJsonValue }[] = [
-          { type: 'RENT', description: 'Rent', amount: totals.rent, meta: { month: monthLabel(draft.period) } },
-        ];
-        if (el.mode !== 'NONE' && (el.amount > 0 || el.currentReading != null)) {
-          items.push({
-            type: 'ELECTRICITY',
-            description: el.mode === 'METER' && el.currentReading != null ? `Electricity (${el.units} units x ${el.ratePerUnit})` : 'Electricity',
-            amount: el.amount,
-            meta: { mode: el.mode, previousReading: el.previousReading, currentReading: el.currentReading, units: el.units, ratePerUnit: el.ratePerUnit, calculatedAmount: el.calculatedAmount, isOverride: el.isOverride },
-          });
-        }
-        for (const c of draft.charges) items.push({ type: 'CHARGE', description: c.name, amount: c.amount, meta: { chargeType: c.type, ...(c.note ? { note: c.note } : {}) } });
-        if (totals.lateFee > 0) items.push({ type: 'LATE_FEE', description: 'Late fee', amount: totals.lateFee });
-        if (totals.discount > 0) items.push({ type: 'DISCOUNT', description: 'Discount', amount: -totals.discount });
-        if (totals.previousBalance > 0) {
-          items.push({ type: 'PREVIOUS_BALANCE', description: 'Previous balance', amount: totals.previousBalance, meta: { bills: draft.carry.map((b) => b.billNumber), openingBalance: draft.openingBalance } });
-        }
-
-        const created = await tx.bill.create({
-          data: {
-            billNumber,
-            propertyId: a.room.propertyId,
-            assignmentId: a.id,
-            tenantId: a.tenantId,
-            roomId: a.roomId,
-            billingPeriod: draft.period,
-            dueDate: draft.dueDate,
-            status: totals.totalDue === 0 ? 'PAID' : 'GENERATED',
-            rentAmount: totals.rent,
-            electricityAmount: totals.electricity,
-            otherChargesAmount: totals.otherCharges,
-            lateFee: totals.lateFee,
-            discount: totals.discount,
-            previousBalance: totals.previousBalance,
-            totalDue: totals.totalDue,
-            notes: draft.notes,
-            // The issue moment comes from the app's clock; its India calendar day is the bill's "Issued on" date.
-            createdAt: new Date(),
-            items: { create: items.map((i, idx) => ({ ...i, sortOrder: idx })) },
-          },
-        });
-        if (el.mode === 'METER' && el.currentReading != null) {
-          await tx.electricityReading.create({
-            data: {
-              assignmentId: a.id, billingPeriod: draft.period, previousReading: el.previousReading ?? 0, currentReading: el.currentReading, units: el.units,
-              ratePerUnit: el.ratePerUnit ?? 0, amount: el.amount, isOverride: el.isOverride, billId: created.id,
-            },
-          });
-        }
-        if (draft.carry.length) await tx.bill.updateMany({ where: { id: { in: draft.carry.map((b) => b.id) } }, data: { carriedForwardToId: created.id } });
-        return created;
-      });
+      const bill = await this.prisma.$transaction((tx) => this.createInTx(tx, userId, { ...dto, replacingBillId: undefined }));
       await this.audit.log(userId, 'bill.create', 'bill', bill.id, { billNumber: bill.billNumber });
       return this.get(userId, bill.id);
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new ConflictException('A bill for this month already exists for this tenant');
       throw e;
     }
+  }
+
+  /**
+   * A bill that can be edited: not cancelled, nothing paid on it, and its balance not yet carried into a later bill.
+   * Bill amounts are frozen in the database, so an edit replaces the bill (see `revise`) instead of changing it.
+   */
+  private async editableBill(userId: string, id: string) {
+    const bill = await this.ownedBill(userId, id);
+    if (bill.status === 'CANCELLED') throw new ConflictException('A cancelled bill cannot be edited');
+    if (money(bill.paidAmount) > 0) throw new ConflictException('This bill already has payments, so it cannot be edited. Put any correction on the next bill as an extra charge or a discount.');
+    if (bill.carriedForwardToId) {
+      const next = await this.prisma.bill.findUnique({ where: { id: bill.carriedForwardToId }, select: { billNumber: true } });
+      throw new ConflictException(`This bill's balance is already part of ${next?.billNumber ?? 'a later bill'}. Edit that bill instead.`);
+    }
+    const later = await this.prisma.bill.findFirst({ where: { assignmentId: bill.assignmentId, status: { not: 'CANCELLED' }, billingPeriod: { gt: bill.billingPeriod } }, select: { billNumber: true } });
+    if (later) throw new ConflictException(`Only the latest bill can be edited (${later.billNumber} comes after this one)`);
+    return bill;
+  }
+
+  /**
+   * Edits a bill: in one transaction the old bill is cancelled and a corrected bill for the same tenant and month is created
+   * from the new details. Balances that were carried into the old bill are carried into the corrected one. Each bill notes the other.
+   */
+  async revise(userId: string, id: string, dto: CreateBillDto) {
+    const old = await this.editableBill(userId, id);
+    try {
+      const bill = await this.prisma.$transaction(async (tx) => {
+        // Re-checked atomically: a payment recorded meanwhile, or a carry into a later bill, stops the edit.
+        const cancelled = await tx.bill.updateMany({
+          where: { id, status: { notIn: ['CANCELLED', 'DRAFT'] }, paidAmount: 0, carriedForwardToId: null },
+          data: { status: 'CANCELLED' },
+        });
+        if (cancelled.count === 0) throw new ConflictException('This bill changed while you were editing it. Open it again and retry.');
+        await tx.electricityReading.deleteMany({ where: { billId: id } });
+        await tx.bill.updateMany({ where: { carriedForwardToId: id }, data: { carriedForwardToId: null } });
+        const created = await this.createInTx(tx, userId, {
+          ...dto, assignmentId: old.assignmentId, tenantId: undefined, replacingBillId: undefined,
+          billingPeriod: old.billingPeriod.toISOString().slice(0, 7),
+          notes: [`Corrected version of ${old.billNumber}.`, dto.notes?.trim()].filter(Boolean).join(' '),
+        });
+        await tx.bill.update({ where: { id }, data: { notes: [old.notes, `Replaced by ${created.billNumber} (bill edited).`].filter(Boolean).join('\n') } });
+        return created;
+      });
+      await this.audit.log(userId, 'bill.revise', 'bill', bill.id, { replaces: old.billNumber, billNumber: bill.billNumber });
+      return this.get(userId, bill.id);
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new ConflictException('A bill for this month already exists for this tenant');
+      throw e;
+    }
+  }
+
+  /** Builds and saves a bill inside a transaction: every check re-runs there and the client's numbers are never stored. */
+  private async createInTx(tx: Prisma.TransactionClient, userId: string, dto: CreateBillDto) {
+    const { draft } = await this.buildDraft(userId, dto, tx);
+    const { assignment: a, totals } = draft;
+    const property = await tx.property.update({ where: { id: a.room.propertyId }, data: { nextBillSeq: { increment: 1 } }, select: { billPrefix: true, nextBillSeq: true } });
+    const seq = property.nextBillSeq - 1;
+    const billNumber = `${property.billPrefix}-${draft.period.getUTCFullYear()}${String(draft.period.getUTCMonth() + 1).padStart(2, '0')}-${String(seq).padStart(4, '0')}`;
+
+    const el = draft.electricity;
+    const items: { type: BillItemType; description: string; amount: number; meta?: Prisma.InputJsonValue }[] = [
+      { type: 'RENT', description: 'Rent', amount: totals.rent, meta: { month: monthLabel(draft.period) } },
+    ];
+    if (el.mode !== 'NONE' && (el.amount > 0 || el.currentReading != null)) {
+      items.push({
+        type: 'ELECTRICITY',
+        description: el.mode === 'METER' && el.currentReading != null ? `Electricity (${el.units} units x ${el.ratePerUnit})` : 'Electricity',
+        amount: el.amount,
+        meta: { mode: el.mode, previousReading: el.previousReading, currentReading: el.currentReading, units: el.units, ratePerUnit: el.ratePerUnit, calculatedAmount: el.calculatedAmount, isOverride: el.isOverride },
+      });
+    }
+    for (const c of draft.charges) items.push({ type: 'CHARGE', description: c.name, amount: c.amount, meta: { chargeType: c.type, ...(c.note ? { note: c.note } : {}) } });
+    if (totals.lateFee > 0) items.push({ type: 'LATE_FEE', description: 'Late fee', amount: totals.lateFee });
+    if (totals.discount > 0) items.push({ type: 'DISCOUNT', description: 'Discount', amount: -totals.discount });
+    if (totals.previousBalance > 0) {
+      items.push({ type: 'PREVIOUS_BALANCE', description: 'Previous balance', amount: totals.previousBalance, meta: { bills: draft.carry.map((b) => b.billNumber), openingBalance: draft.openingBalance } });
+    }
+
+    const created = await tx.bill.create({
+      data: {
+        billNumber,
+        propertyId: a.room.propertyId,
+        assignmentId: a.id,
+        tenantId: a.tenantId,
+        roomId: a.roomId,
+        billingPeriod: draft.period,
+        dueDate: draft.dueDate,
+        status: totals.totalDue === 0 ? 'PAID' : 'GENERATED',
+        rentAmount: totals.rent,
+        electricityAmount: totals.electricity,
+        otherChargesAmount: totals.otherCharges,
+        lateFee: totals.lateFee,
+        discount: totals.discount,
+        previousBalance: totals.previousBalance,
+        totalDue: totals.totalDue,
+        notes: draft.notes,
+        // The issue moment comes from the app's clock; its India calendar day is the bill's "Issued on" date.
+        createdAt: new Date(),
+        items: { create: items.map((i, idx) => ({ ...i, sortOrder: idx })) },
+      },
+    });
+    if (el.mode === 'METER' && el.currentReading != null) {
+      await tx.electricityReading.create({
+        data: {
+          assignmentId: a.id, billingPeriod: draft.period, previousReading: el.previousReading ?? 0, currentReading: el.currentReading, units: el.units,
+          ratePerUnit: el.ratePerUnit ?? 0, amount: el.amount, isOverride: el.isOverride, billId: created.id,
+        },
+      });
+    }
+    if (draft.carry.length) await tx.bill.updateMany({ where: { id: { in: draft.carry.map((b) => b.id) } }, data: { carriedForwardToId: created.id } });
+    return created;
   }
 
   private async ownedBill(userId: string, id: string) {
