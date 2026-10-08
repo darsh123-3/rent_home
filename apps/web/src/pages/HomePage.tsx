@@ -52,10 +52,10 @@ export function HomePage() {
 
   const collection = d?.collection && (
     <Link to="/reports" className="block rounded-xl bg-primary p-5 text-white transition-colors hover:bg-primary-dark">
-      <div className="text-small font-medium opacity-80">Money received in {d.collection.monthLabel}</div>
-      <div className="mt-1 text-[34px] font-bold leading-[40px]">{formatINR(d.collection.collected)}</div>
-      <div className="mb-4 text-small opacity-80">{d.collection.monthLabel} bills total {formatINR(d.collection.expected)}</div>
-      <ProgressBar value={d.collection.collectionRate} />
+      <div className="text-small font-medium opacity-80">Paid for {d.collection.monthLabel} bills</div>
+      <div className="mt-1 text-[34px] font-bold leading-[40px]">{formatINR(d.collection.forBills.paid)}</div>
+      <div className="mb-4 text-small opacity-80">of {formatINR(d.collection.forBills.total)} · {formatINR(d.collection.forBills.remaining)} still to collect</div>
+      <ProgressBar value={d.collection.forBills.rate} />
       {k && k.composition.bills > 0 ? (
         <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-caption opacity-90">
           <span>Rent {formatINR(k.composition.rent)}</span>
@@ -63,6 +63,7 @@ export function HomePage() {
           {k.composition.other > 0 ? <span>Other {formatINR(k.composition.other)}</span> : null}
         </div>
       ) : null}
+      <div className="mt-2 text-caption opacity-80">Money received in {d.collection.monthLabel} (any month's bills): {formatINR(d.collection.collected)}</div>
     </Link>
   );
 

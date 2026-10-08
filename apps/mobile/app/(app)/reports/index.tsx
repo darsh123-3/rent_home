@@ -39,13 +39,13 @@ function CollectionTab({ propertyId, initialMonth }: { propertyId: string; initi
       {q.isLoading ? <SkeletonList count={2} /> : q.isError ? <ErrorState error={q.error} onRetry={q.refetch} /> : d ? (
         <>
           <View className="rounded-xl bg-primary p-5">
-            <Text variant="secondaryMedium" tone="white" className="opacity-80">Money received in {d.monthLabel}</Text>
-            <Text variant="display" tone="white" style={{ fontSize: 34, lineHeight: 40 }} className="mt-1">{formatINR(d.collected)}</Text>
-            <Text variant="secondary" tone="white" className="mb-4 opacity-80">{d.monthLabel} bills total {formatINR(d.expected)}</Text>
-            <ProgressBar value={d.collectionRate} />
+            <Text variant="secondaryMedium" tone="white" className="opacity-80">Paid for {d.monthLabel} bills</Text>
+            <Text variant="display" tone="white" style={{ fontSize: 34, lineHeight: 40 }} className="mt-1">{formatINR(d.forBills.paid)}</Text>
+            <Text variant="secondary" tone="white" className="mb-4 opacity-80">of {formatINR(d.forBills.total)} · {formatINR(d.forBills.remaining)} still to collect</Text>
+            <ProgressBar value={d.forBills.rate} />
           </View>
           <View className="flex-row gap-3">
-            <StatCard value={formatINR(d.expected)} label={`${d.monthLabel} bills`} />
+            <StatCard value={formatINR(d.forBills.total)} label={`${d.monthLabel} bills`} />
             <StatCard value={formatINR(d.collected)} label={`Received in ${d.monthLabel}`} />
           </View>
           <Card className="gap-1">
