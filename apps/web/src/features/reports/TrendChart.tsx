@@ -21,8 +21,8 @@ export function TrendChart({ data, highlight }: { data: Point[]; highlight: stri
         {data.map((p) => <span key={p.month} className={`flex-1 text-center text-caption ${p.month === highlight ? 'text-primary' : 'text-ink-muted'}`}>{p.label}</span>)}
       </div>
       <div className="mt-3 flex items-center justify-center gap-5 text-caption text-ink-soft">
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-line-strong" />Billed</span>
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-primary" />Collected</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-line-strong" />Bills for the month</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-primary" />Received in the month</span>
       </div>
     </div>
   );

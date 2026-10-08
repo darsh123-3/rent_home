@@ -23,8 +23,8 @@ export function TrendChart({ data, highlight }: { data: Point[]; highlight: stri
         {data.map((p) => <Text key={p.month} variant="caption" tone={p.month === highlight ? 'primary' : 'muted'} className="flex-1 text-center">{p.label}</Text>)}
       </View>
       <View className="mt-3 flex-row items-center justify-center gap-5">
-        <View className="flex-row items-center gap-1.5"><View className="h-2.5 w-2.5 rounded-sm bg-line-strong" /><Text variant="caption" tone="soft">Billed</Text></View>
-        <View className="flex-row items-center gap-1.5"><View className="h-2.5 w-2.5 rounded-sm bg-primary" /><Text variant="caption" tone="soft">Collected</Text></View>
+        <View className="flex-row items-center gap-1.5"><View className="h-2.5 w-2.5 rounded-sm bg-line-strong" /><Text variant="caption" tone="soft">Bills for the month</Text></View>
+        <View className="flex-row items-center gap-1.5"><View className="h-2.5 w-2.5 rounded-sm bg-primary" /><Text variant="caption" tone="soft">Received in the month</Text></View>
       </View>
     </View>
   );

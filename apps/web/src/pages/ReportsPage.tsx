@@ -41,12 +41,12 @@ function CollectionTab({ propertyId, initialMonth }: { propertyId: string; initi
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-4">
             <div className="rounded-xl bg-primary p-5 text-white">
-              <div className="text-small font-medium opacity-80">Collected in {d.monthLabel}</div>
+              <div className="text-small font-medium opacity-80">Money received in {d.monthLabel}</div>
               <div className="mt-1 text-[34px] font-bold leading-[40px]">{formatINR(d.collected)}</div>
-              <div className="mb-4 text-small opacity-80">of {formatINR(d.expected)} expected · {Math.round(d.collectionRate * 100)}%</div>
+              <div className="mb-4 text-small opacity-80">{d.monthLabel} bills total {formatINR(d.expected)}</div>
               <ProgressBar value={d.collectionRate} />
             </div>
-            <div className="flex gap-3"><StatCard value={formatINR(d.expected)} label="Expected" /><StatCard value={formatINR(d.collected)} label="Collected" /></div>
+            <div className="flex gap-3"><StatCard value={formatINR(d.expected)} label={`${d.monthLabel} bills`} /><StatCard value={formatINR(d.collected)} label={`Received in ${d.monthLabel}`} /></div>
             <Card className="space-y-1">
               <div className="text-small text-ink-soft">Total pending from tenants</div>
               <div className={`text-title ${d.pending > 0 ? 'text-danger' : 'text-success'}`}>{formatINR(d.pending)}</div>
