@@ -9,6 +9,7 @@ import { OUTSTANDING_BILL_WHERE } from '../common/outstanding';
 import { paginate, skipTake } from '../common/pagination';
 import { PrismaService } from '../common/prisma.service';
 import { PropertiesService } from '../properties/properties.service';
+import { pdfToJpeg } from './bill-image';
 import { renderBillPdf } from './bill-pdf';
 import { renderBillPremiumPdf } from './bill-premium-pdf';
 import { renderBillStatementPdf } from './bill-statement-pdf';
@@ -372,9 +373,20 @@ export class BillsService {
         property: { ...bill.property, billFooterNote: property.billFooterNote, upiId: property.upiId },
       });
       await this.audit.log(userId, 'bill.pdf', 'bill', id);
-      return { buffer, fileName: `Invoice-${bill.billNumber}.pdf` };
+      return { buffer, fileName: `Invoice-${bill.billNumber}.pdf`, billNumber: bill.billNumber };
     } catch {
       throw new InternalServerErrorException('The PDF could not be generated. Please try again.');
+    }
+  }
+
+  /** The bill as a JPEG picture (the premium PDF's page), for sharing on WhatsApp and similar apps. */
+  async image(userId: string, id: string) {
+    const { buffer: pdf, billNumber } = await this.pdf(userId, id, 'premium');
+    try {
+      const buffer = await pdfToJpeg(pdf);
+      return { buffer, fileName: `Bill-${billNumber}.jpg` };
+    } catch {
+      throw new InternalServerErrorException('The bill image could not be generated. Please try again.');
     }
   }
 

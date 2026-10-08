@@ -82,6 +82,22 @@ describe('Bill PDF', () => {
     await fetchPdf(other, app, `/bills/${billId}/pdf`).expect(404);
   });
 
+  it('serves the bill as a JPEG picture for sharing, privately', async () => {
+    const res = await fetchPdf(owner, app, `/bills/${billId}/image`).expect(200);
+    expect(res.headers['content-type']).toBe('image/jpeg');
+    expect(res.headers['content-disposition']).toBe('inline; filename="Bill-SUN-202609-0001.jpg"');
+    const jpg = res.body as Buffer;
+    expect(jpg.subarray(0, 3).toString('hex')).toBe('ffd8ff'); // JPEG signature
+    // A4 at 2x: the SOF0 marker holds height and width
+    const sof = jpg.indexOf(Buffer.from([0xff, 0xc0]));
+    expect(sof).toBeGreaterThan(0);
+    expect([jpg.readUInt16BE(sof + 7), jpg.readUInt16BE(sof + 5)]).toEqual([1191, 1684]);
+    expect(jpg.length).toBeGreaterThan(50_000);
+    expect((await fetchPdf(owner, app, `/bills/${billId}/image?download=1`).expect(200)).headers['content-disposition']).toBe('attachment; filename="Bill-SUN-202609-0001.jpg"');
+    await request(app.getHttpServer()).get(`/bills/${billId}/image`).expect(401);
+    await fetchPdf(other, app, `/bills/${billId}/image`).expect(404);
+  });
+
   it('shows PAID once settled and CANCELLED for cancelled bills', async () => {
     await owner.post(`/bills/${billId}/payments`, { amount: 146600, paymentDate: '2026-09-12', method: 'CASH' }).expect(201);
     const paid = (await pdfParse((await fetchPdf(owner, app, `/bills/${billId}/pdf?format=invoice`)).body)).text.replace(/\s+/g, ' ');
