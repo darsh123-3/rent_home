@@ -46,6 +46,8 @@ describe('Dashboard & reports (e2e)', () => {
     const c = (await owner.get(`/reports/collection?propertyId=${propertyId}&month=2026-09`).expect(200)).body.data;
     expect(c).toMatchObject({ month: '2026-09', monthLabel: 'September 2026', expected: 15000, collected: 11000, paymentCount: 2, pending: 4000 });
     expect(c.collectionRate).toBeCloseTo(11000 / 15000, 5);
+    // Paid on September's bills, whenever paid: 6000 of 10000 and 5000 of 5000
+    expect(c.forBills).toMatchObject({ total: 15000, paid: 11000, remaining: 4000 });
     expect(c.byMethod).toEqual([{ method: 'CASH', amount: 5000, count: 1 }, { method: 'UPI', amount: 6000, count: 1 }].sort((a, b) => b.amount - a.amount));
     expect(c.trend).toHaveLength(6);
     expect(c.trend.at(-1)).toMatchObject({ month: '2026-09', expected: 15000, collected: 11000 });
@@ -60,6 +62,7 @@ describe('Dashboard & reports (e2e)', () => {
     const c = (await owner.get(`/reports/collection?propertyId=${propertyId}&month=2026-10`)).body.data;
     expect(c.expected).toBe(9000); // October's own rent only
     expect(c.pending).toBe(13000); // everything still owed by the tenant (single, non-double-counted figure)
+    expect(c.forBills).toMatchObject({ total: 13000, paid: 0, remaining: 13000 }); // October's bill includes the 4000 previous due
     // clean up for the following tests
     await owner.post(`/bills/${oct.id}/cancel`, {}).expect(200);
     expect((await owner.get(`/reports/collection?propertyId=${propertyId}&month=2026-09`)).body.data.pending).toBe(4000);

@@ -22,12 +22,12 @@ export class DashboardService {
     // `selected` comes from the user's own property list above, so the ownership re-check inside each report is skipped.
     const ids = [selected.id];
     const [collection, occupancy, outstanding, extras] = await Promise.all([this.reports.collectionFor(ids, q.month), this.reports.occupancyFor(ids), this.reports.outstandingFor(ids), this.reports.extrasFor(ids)]);
-    const { month, monthLabel, expected, collected, paymentCount, pending, collectionRate } = collection;
+    const { month, monthLabel, expected, collected, paymentCount, pending, collectionRate, forBills } = collection;
     return {
       username: user.username,
       properties,
       property: selected,
-      collection: { month, monthLabel, expected, collected, paymentCount, pending, collectionRate },
+      collection: { month, monthLabel, expected, collected, paymentCount, pending, collectionRate, forBills },
       occupancy: { totalRooms: occupancy.totalRooms, occupied: occupancy.occupied, vacant: occupancy.vacant, maintenance: occupancy.maintenance, occupancyPercent: occupancy.occupancyPercent },
       // Current tenants only: people who have moved out are listed separately below, so they never push current dues off the list.
       pendingPayments: outstanding.items.filter((i) => i.tenantStatus === 'ACTIVE').slice(0, 5),

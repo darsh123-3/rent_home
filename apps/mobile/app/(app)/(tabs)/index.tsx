@@ -58,15 +58,16 @@ export default function HomeScreen() {
     left = (
       <>
         <Pressable onPress={() => router.push('/reports')} accessibilityRole="button" className="rounded-xl bg-primary p-5 active:bg-primary-dark">
-          <Text variant="secondaryMedium" tone="white" className="opacity-80">Money received in {c.monthLabel}</Text>
-          <Text variant="display" tone="white" className="mt-1" style={{ fontSize: 34, lineHeight: 40 }}>{formatINR(c.collected)}</Text>
-          <Text variant="secondary" tone="white" className="mb-4 opacity-80">{c.monthLabel} bills total {formatINR(c.expected)}</Text>
-          <ProgressBar value={c.collectionRate} />
+          <Text variant="secondaryMedium" tone="white" className="opacity-80">Paid for {c.monthLabel} bills</Text>
+          <Text variant="display" tone="white" className="mt-1" style={{ fontSize: 34, lineHeight: 40 }}>{formatINR(c.forBills.paid)}</Text>
+          <Text variant="secondary" tone="white" className="mb-4 opacity-80">of {formatINR(c.forBills.total)} · {formatINR(c.forBills.remaining)} still to collect</Text>
+          <ProgressBar value={c.forBills.rate} />
           {k && k.composition.bills > 0 ? (
             <Text variant="caption" tone="white" className="mt-3 opacity-90">
               Rent {formatINR(k.composition.rent)}  ·  Electricity {formatINR(k.composition.electricity)}{k.composition.other > 0 ? `  ·  Other ${formatINR(k.composition.other)}` : ''}
             </Text>
           ) : null}
+          <Text variant="caption" tone="white" className="mt-2 opacity-80">Money received in {c.monthLabel} (any month's bills): {formatINR(c.collected)}</Text>
         </Pressable>
 
         {k && k.toBill.count > 0 ? (

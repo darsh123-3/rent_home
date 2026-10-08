@@ -295,7 +295,7 @@ export interface DashboardData {
   username: string;
   properties: { id: string; name: string; city: string; state: string }[];
   property: { id: string; name: string; city: string; state: string } | null;
-  collection: { month: string; monthLabel: string; expected: number; collected: number; paymentCount: number; pending: number; collectionRate: number } | null;
+  collection: { month: string; monthLabel: string; expected: number; collected: number; paymentCount: number; pending: number; collectionRate: number; forBills: BillsPaid } | null;
   occupancy: { totalRooms: number; occupied: number; vacant: number; maintenance: number; occupancyPercent: number } | null;
   pendingPayments: (PendingPayment & { tenantStatus?: TenantStatus })[];
   pendingCount?: number;
@@ -335,6 +335,9 @@ export interface RecentPayment {
   roomNumber: string;
 }
 
+/** How much of a month's bills has been paid, whenever it was paid. Totals include previous dues on those bills. */
+export type BillsPaid = { total: number; paid: number; remaining: number; rate: number };
+
 export interface CollectionReport {
   month: string;
   monthLabel: string;
@@ -343,6 +346,7 @@ export interface CollectionReport {
   paymentCount: number;
   pending: number;
   collectionRate: number;
+  forBills: BillsPaid;
   byMethod: { method: PaymentMethod; amount: number; count: number }[];
   /** Charge lines billed in the month, by category: WATER, CLEANING, MNGL_GAS, INTERNET and OTHER (every other charge). */
   byCategory: { category: 'WATER' | 'CLEANING' | 'MNGL_GAS' | 'INTERNET' | 'OTHER'; label: string; amount: number; count: number }[];

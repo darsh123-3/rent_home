@@ -55,7 +55,7 @@ export class ReportsService {
     const [billed, collected, byMethod, outstanding, trend, chargeItems] = await Promise.all([
       this.prisma.bill.findMany({
         where: { propertyId: { in: propertyIds }, billingPeriod: start, status: { notIn: ['CANCELLED', 'DRAFT'] } },
-        select: { totalDue: true, previousBalance: true, rentAmount: true, electricityAmount: true, otherChargesAmount: true },
+        select: { totalDue: true, paidAmount: true, previousBalance: true, rentAmount: true, electricityAmount: true, otherChargesAmount: true },
       }),
       this.prisma.payment.aggregate({ where: { ...STANDING_PAYMENT_WHERE, bill: { propertyId: { in: propertyIds } }, paymentDate: { gte: start, lte: end } }, _sum: { amount: true }, _count: true }),
       this.prisma.payment.groupBy({ by: ['method'], where: { ...STANDING_PAYMENT_WHERE, bill: { propertyId: { in: propertyIds } }, paymentDate: { gte: start, lte: end } }, _sum: { amount: true }, _count: true }),
@@ -82,6 +82,13 @@ export class ReportsService {
       paymentCount: collected._count,
       pending: outstanding,
       collectionRate: expected > 0 ? Math.min(1, collectedAmount / expected) : 0,
+      // How much of this month's bills has been paid, whenever it was paid (a month's bills are mostly paid the next month).
+      // Totals include any previous due on those bills, as the Bills page shows them.
+      forBills: (() => {
+        const total = sumOf((b) => b.totalDue);
+        const paid = sumOf((b) => b.paidAmount);
+        return { total, paid, remaining: fromPaise(toPaise(total) - toPaise(paid)), rate: total > 0 ? Math.min(1, paid / total) : 0 };
+      })(),
       // Water, Housekeeping, MNGL gas, WiFi and every other charge billed for the month.
       byCategory: CATEGORY_ORDER.map((c) => ({ category: c, label: CATEGORY_LABEL[c], amount: cat[c], count: counts[c] })),
       byMethod: byMethod.map((m) => ({ method: m.method, amount: num(m._sum.amount), count: m._count })).sort((a, b) => b.amount - a.amount),

@@ -41,12 +41,12 @@ function CollectionTab({ propertyId, initialMonth }: { propertyId: string; initi
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-4">
             <div className="rounded-xl bg-primary p-5 text-white">
-              <div className="text-small font-medium opacity-80">Money received in {d.monthLabel}</div>
-              <div className="mt-1 text-[34px] font-bold leading-[40px]">{formatINR(d.collected)}</div>
-              <div className="mb-4 text-small opacity-80">{d.monthLabel} bills total {formatINR(d.expected)}</div>
-              <ProgressBar value={d.collectionRate} />
+              <div className="text-small font-medium opacity-80">Paid for {d.monthLabel} bills</div>
+              <div className="mt-1 text-[34px] font-bold leading-[40px]">{formatINR(d.forBills.paid)}</div>
+              <div className="mb-4 text-small opacity-80">of {formatINR(d.forBills.total)} · {formatINR(d.forBills.remaining)} still to collect</div>
+              <ProgressBar value={d.forBills.rate} />
             </div>
-            <div className="flex gap-3"><StatCard value={formatINR(d.expected)} label={`${d.monthLabel} bills`} /><StatCard value={formatINR(d.collected)} label={`Received in ${d.monthLabel}`} /></div>
+            <div className="flex gap-3"><StatCard value={formatINR(d.forBills.total)} label={`${d.monthLabel} bills`} /><StatCard value={formatINR(d.collected)} label={`Received in ${d.monthLabel}`} /></div>
             <Card className="space-y-1">
               <div className="text-small text-ink-soft">Total pending from tenants</div>
               <div className={`text-title ${d.pending > 0 ? 'text-danger' : 'text-success'}`}>{formatINR(d.pending)}</div>
